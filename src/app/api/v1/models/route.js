@@ -18,6 +18,7 @@ import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { collectProviderModelVisibility } from "@/sse/services/accountModelPolicy.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -284,10 +285,14 @@ export async function buildModelsList(kindFilter, options = {}) {
   const isDisabled = (alias, modelId) => Array.isArray(disabledByAlias[alias]) && disabledByAlias[alias].includes(modelId);
 
   const activeConnectionByProvider = new Map();
+  const activeConnectionsByProvider = new Map();
   for (const conn of connections) {
     if (!activeConnectionByProvider.has(conn.provider)) {
       activeConnectionByProvider.set(conn.provider, conn);
     }
+    const list = activeConnectionsByProvider.get(conn.provider);
+    if (list) list.push(conn);
+    else activeConnectionsByProvider.set(conn.provider, [conn]);
   }
 
   const models = [];
@@ -352,7 +357,13 @@ export async function buildModelsList(kindFilter, options = {}) {
         || staticAlias
       ).trim();
       const providerModels = PROVIDER_MODELS[staticAlias] || [];
-      const enabledModels = conn?.providerSpecificData?.enabledModels;
+      // Per-account model access is a union across the provider's active accounts:
+      // a model stays visible while at least one account can serve it, and an
+      // unrestricted account keeps the full catalog visible.
+      const { allRestricted, allowedUnion } = collectProviderModelVisibility(
+        activeConnectionsByProvider.get(providerId) || [conn]
+      );
+      const enabledModels = allRestricted ? allowedUnion : null;
       const hasExplicitEnabledModels =
         Array.isArray(enabledModels) && enabledModels.length > 0;
       const isCompatibleProvider =
