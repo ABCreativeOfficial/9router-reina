@@ -7,6 +7,11 @@
  * Semantics (backward compatible with every pre-existing connection):
  *   - missing / not an array / empty  -> no restriction, connection participates as before
  *   - non-empty array                 -> connection is eligible ONLY for those model ids
+ *
+ * The policy is per MODEL, not per thinking level: an entry grants its model at every
+ * level, because `m(level)` is request-time sugar on top of the model `m`. Any stored
+ * `m(level)` entry is normalized down to `m` on read and on write, so an allowlist saved
+ * by an older build never acts as a hidden level restriction.
  */
 
 import { getProviderAlias } from "@/shared/constants/providers";
@@ -16,7 +21,20 @@ import { getProviderConnections } from "@/lib/localDb";
 export const MAX_ENABLED_MODELS = 500;
 
 /**
- * Normalize a user-supplied model allowlist: strings only, trimmed, no blanks, deduped, capped.
+ * Split a request-time thinking suffix off a model id: `m(xhigh)` → base `m`, level `xhigh`.
+ * Mirrors the `(...)` shape parsed by translator/concerns/thinkingUnified.js.
+ * @returns {{ base: string, level: string|null }}
+ */
+export function splitModelLevel(modelId) {
+  const raw = String(modelId ?? "").trim();
+  const m = raw.match(/^(.*)\(([^()]+)\)\s*$/);
+  if (!m) return { base: raw, level: null };
+  return { base: m[1].trim(), level: m[2].trim().toLowerCase() };
+}
+
+/**
+ * Normalize a user-supplied model allowlist: strings only, trimmed, level suffix dropped,
+ * no blanks, deduped, capped.
  * @param {unknown} input
  * @returns {string[]}
  */
@@ -26,7 +44,7 @@ export function sanitizeEnabledModels(input) {
   const seen = new Set();
   for (const entry of input) {
     if (typeof entry !== "string") continue;
-    const id = entry.trim();
+    const id = splitModelLevel(entry).base;
     if (!id || seen.has(id)) continue;
     seen.add(id);
     out.push(id);
@@ -69,32 +87,21 @@ function stripProviderPrefix(modelId, prefixes) {
 
 /**
  * Split a request-time thinking suffix off a model id: `m(xhigh)` → base `m`, level `xhigh`.
- * Mirrors the `(...)` shape parsed by translator/concerns/thinkingUnified.js — the level token
- * is compared verbatim (lowercased), so this never needs updating when new levels appear.
+ * Mirrors the `(...)` shape parsed by translator/concerns/thinkingUnified.js.
  * @returns {{ base: string, level: string|null }}
  */
-export function splitModelLevel(modelId) {
-  const raw = String(modelId ?? "").trim();
-  const m = raw.match(/^(.*)\(([^()]+)\)\s*$/);
-  if (!m) return { base: raw, level: null };
-  return { base: m[1].trim(), level: m[2].trim().toLowerCase() };
-}
 
-/** Normalize an id to `{ base, level }` with the connection's provider prefix removed. */
+/** Normalize an id to the bare model, with the connection's provider prefix and level removed. */
 function normalizeEntry(modelId, prefixes) {
-  const { base, level } = splitModelLevel(modelId);
-  return { base: stripProviderPrefix(base, prefixes), level };
+  return stripProviderPrefix(splitModelLevel(modelId).base, prefixes);
 }
 
 /**
  * Is this connection allowed to serve `model`?
  *
- * Per-level allowlist. Entries are matched exactly after provider-prefix normalization —
- * no fuzzy or substring matching:
- *   - entry `m`          → grants `m` at any thinking level (whole-model grant)
- *   - entry `m(level)`   → grants ONLY that level; a bare `m` request is rejected
- *   - both listed        → union
- * Listing only `m(low)` is therefore how an account is restricted to a single effort level.
+ * Per-model, exact match after provider-prefix and level-suffix normalization — no fuzzy
+ * or substring matching. An entry grants its model at every thinking level, because
+ * `m(level)` is request-time sugar on top of the model `m`, not a distinct model.
  *
  * @param {object} connection - raw provider connection record
  * @param {string|null} model - model id as the router resolved it, suffix still attached
@@ -106,17 +113,12 @@ export function isConnectionEligibleForModel(connection, model) {
   if (!model) return true;                        // model-less lookup (e.g. web search) -> unchanged
   const prefixes = prefixCandidates(connection);
   const requested = normalizeEntry(model, prefixes);
-  return allowed.some((raw) => {
-    const entry = normalizeEntry(raw, prefixes);
-    if (entry.base !== requested.base) return false;
-    return entry.level === null || entry.level === requested.level;
-  });
+  return allowed.some((raw) => normalizeEntry(raw, prefixes) === requested);
 }
 
 /**
  * Union of model ids reachable through the given connections, for `/v1/models` visibility.
- * A model stays visible while at least one account can serve it. Level suffixes are dropped —
- * `/v1/models` lists real models, and the suffix is request-time sugar on top of one of them.
+ * A model stays visible while at least one account can serve it.
  * @param {object[]} connections - active connections of one provider
  * @returns {{ allRestricted: boolean, allowedUnion: string[] }}
  */
@@ -132,8 +134,7 @@ export function collectProviderModelVisibility(connections) {
       allRestricted = false;
       continue;
     }
-    for (const raw of allowed) {
-      const id = splitModelLevel(raw).base;
+    for (const id of allowed) {
       if (!id || seen.has(id)) continue;
       seen.add(id);
       allowedUnion.push(id);
