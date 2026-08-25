@@ -5,15 +5,15 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, ModelAccessModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
-import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
+import { getModelsByProviderId } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
-import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import { buildProviderModelCatalog } from "@/shared/utils/providerModelCatalog";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -51,6 +51,7 @@ export default function ProviderDetailPage() {
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
   const [showBulkImportGrokCli, setShowBulkImportGrokCli] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showModelAccessModal, setShowModelAccessModal] = useState(false);
   const [showEditNodeModal, setShowEditNodeModal] = useState(false);
   const [showBulkProxyModal, setShowBulkProxyModal] = useState(false);
   const [selectedConnection, setSelectedConnection] = useState(null);
@@ -195,6 +196,19 @@ export default function ProviderDetailPage() {
   const providerDisplayAlias = isCompatible
     ? (providerNode?.prefix || providerId)
     : providerAlias;
+
+  // One catalog for both the Available Models grid below and the per-account
+  // Model Access modal, so the two lists cannot drift apart.
+  const modelCatalog = buildProviderModelCatalog({
+    staticModels,
+    liveModels,
+    preferLiveModels: providerId === "cursor",
+    kiloFreeModels,
+    customModels,
+    modelAliases,
+    providerStorageAlias,
+    disabledModelIds,
+  });
 
   const fetchDisabledModels = useCallback(async () => {
     try {
@@ -804,6 +818,22 @@ export default function ProviderDetailPage() {
     }
   };
 
+  const handleUpdateModelAccess = async (payload) => {
+    try {
+      const res = await fetch(`/api/providers/${selectedConnection.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        await fetchConnections();
+        setShowModelAccessModal(false);
+      }
+    } catch (error) {
+      console.log("Error updating model access:", error);
+    }
+  };
+
   const handleUpdateConnectionStatus = async (id, isActive) => {
     try {
       const res = await fetch(`/api/providers/${id}`, {
@@ -992,6 +1022,10 @@ export default function ProviderDetailPage() {
                   setSelectedConnection(conn);
                   setShowEditModal(true);
                 }}
+                onEditModelAccess={() => {
+                  setSelectedConnection(conn);
+                  setShowModelAccessModal(true);
+                }}
                 onDelete={() => handleDelete(conn.id)}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
@@ -1091,22 +1125,9 @@ export default function ProviderDetailPage() {
         />
       );
     }
-    // Combine hardcoded models with Kilo free models (deduplicated)
-    // Exclude non-llm models (embedding, tts, etc.) — they have dedicated pages under media-providers
-    const allModels = [
-      ...models,
-      ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
-    ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; });
-    const disabledSet = new Set(disabledModelIds);
-    const displayModels = allModels.filter((m) => !disabledSet.has(m.id));
-    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
-    const customModelRows = getProviderCustomModelRows({
-      customModels,
-      modelAliases,
-      providerAlias: providerStorageAlias,
-      builtInModels: models,
-      type: "llm",
-    });
+    // Shared catalog: built-in (or live) + Kilo free, split by the global disabled list,
+    // plus custom models and legacy aliases. Same source the Model Access modal reads.
+    const { displayModels, disabledModels: disabledDisplayModels, customRows: customModelRows } = modelCatalog;
 
     return (
       <div className="flex flex-wrap gap-3">
@@ -1675,10 +1696,7 @@ export default function ProviderDetailPage() {
             )}
           </div>
           {!isCompatible && (() => {
-            const allIds = [
-              ...models,
-              ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
-            ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; }).map((m) => m.id);
+            const allIds = [...modelCatalog.displayModels, ...modelCatalog.disabledModels].map((m) => m.id);
             const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
             return (
               <div className="flex gap-2">
@@ -1766,6 +1784,13 @@ export default function ProviderDetailPage() {
         proxyPools={proxyPools}
         onSave={handleUpdateConnection}
         onClose={() => setShowEditModal(false)}
+      />
+      <ModelAccessModal
+        isOpen={showModelAccessModal}
+        connection={selectedConnection}
+        entries={modelCatalog.entries}
+        onSave={handleUpdateModelAccess}
+        onClose={() => setShowModelAccessModal(false)}
       />
       {isCompatible && (
         <EditCompatibleNodeModal
