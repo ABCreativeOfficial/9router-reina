@@ -92,4 +92,9 @@ describe("PUT /api/providers/[id] — enabledModels persistence", () => {
       enabledModels: ["sol"],
     });
   });
+
+  it("stores level-suffixed entries verbatim", async () => {
+    await PUT(req({ providerSpecificData: { enabledModels: [" m(low) ", "m(low)", "m(high)", "n"] } }), { params });
+    expect(lastUpdate().providerSpecificData.enabledModels).toEqual(["m(low)", "m(high)", "n"]);
+  });
 });
