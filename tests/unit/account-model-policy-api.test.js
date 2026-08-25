@@ -93,8 +93,8 @@ describe("PUT /api/providers/[id] — enabledModels persistence", () => {
     });
   });
 
-  it("stores level-suffixed entries verbatim", async () => {
+  it("normalizes level-suffixed entries down to their base model", async () => {
     await PUT(req({ providerSpecificData: { enabledModels: [" m(low) ", "m(low)", "m(high)", "n"] } }), { params });
-    expect(lastUpdate().providerSpecificData.enabledModels).toEqual(["m(low)", "m(high)", "n"]);
+    expect(lastUpdate().providerSpecificData.enabledModels).toEqual(["m", "n"]);
   });
 });
