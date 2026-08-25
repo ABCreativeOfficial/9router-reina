@@ -593,11 +593,14 @@ describe("openaiToKiroRequest", () => {
         {}
       );
 
+      // Top-level systemPrompt is rejected by Kiro (400) → must never be sent.
       expect(first).not.toHaveProperty("systemPrompt");
+      expect(second).not.toHaveProperty("systemPrompt");
       expect(kiroPromptOf(first)).toContain("<thinking_mode>enabled</thinking_mode>");
       expect(kiroPromptOf(first)).toBe(kiroPromptOf(second));
       expect(kiroPromptOf(first)).not.toContain("Current time");
       expect(first.conversationState.currentMessage.userInputMessage.content).toContain("Current time");
+      expect(second.conversationState.currentMessage.userInputMessage.content).toContain("Current time");
     });
 
     it("replays frozen msg0 for explicit Kiro sessions while keeping current time fresh", () => {
