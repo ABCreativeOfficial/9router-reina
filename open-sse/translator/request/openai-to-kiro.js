@@ -342,9 +342,10 @@ export function openaiToKiroRequest(model, body, stream, credentials) {
 
   const timestamp = new Date().toISOString();
 
-  // The system prompt travels inside the first user turn's content (contentPrefix):
-  // the CodeWhisperer surface rejects a top-level `systemPrompt` with
-  // 400 REQUEST_BODY_INVALID, so the value below is only a replay cache key.
+  // The assembled system/thinking text is folded into the first user turn.
+  // Kiro rejects a top-level `systemPrompt` with 400 REQUEST_BODY_INVALID, so
+  // this value is also used only as the replay cache key. OpenAI system-role
+  // messages are already wrapped in <instructions> by convertMessages above.
   const systemPromptParts = [];
   if (thinkingBudget !== null && !usesNativeGptEffort) {
     systemPromptParts.push(buildThinkingSystemPrefix(thinkingBudget));
@@ -419,6 +420,7 @@ export function openaiToKiroRequest(model, body, stream, credentials) {
   if (profileArn) {
     payload.profileArn = profileArn;
   }
+  // NOTE: no top-level payload.systemPrompt — Kiro rejects that field (#2989).
   if (additionalModelRequestFields) {
     payload.additionalModelRequestFields = additionalModelRequestFields;
   }
