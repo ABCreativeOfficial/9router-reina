@@ -142,4 +142,43 @@ describe("getProviderCredentials — per-account model access", () => {
     const creds = await getProviderCredentials("codex", null, null);
     expect(creds.connectionId).toBe("A");
   });
+
+  it("routes a level-suffixed request to the account granted that level", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      acc("LOW", ["gpt-5.6-luna(low)"], { priority: 1 }),
+      acc("ALL", ["gpt-5.6-luna"], { priority: 2 }),
+    ]);
+    // low is granted on both; fill-first takes the top-priority one
+    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna(low)")).connectionId).toBe("LOW");
+    // xhigh is only on the whole-model grant
+    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna(xhigh)")).connectionId).toBe("ALL");
+    // a bare request is barred from the level-only account
+    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna")).connectionId).toBe("ALL");
+  });
+
+  it("returns null when no account is granted the requested level", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      acc("A", ["gpt-5.6-luna(low)"]),
+      acc("B", ["gpt-5.6-luna(medium)"]),
+    ]);
+    expect(await getProviderCredentials("codex", null, "gpt-5.6-luna(xhigh)")).toBeNull();
+  });
+
+  it("level-suffixed fallback stays inside the accounts granted that level", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      acc("A", ["m(low)"], { priority: 1 }),
+      acc("B", ["m"], { priority: 2 }),
+      acc("C", ["m(high)"], { priority: 3 }),
+    ]);
+    const exclude = new Set();
+    const picked = [];
+    for (let i = 0; i < 2; i++) {
+      const creds = await getProviderCredentials("codex", exclude, "m(low)");
+      picked.push(creds.connectionId);
+      exclude.add(creds.connectionId);
+    }
+    expect(picked).toEqual(["A", "B"]);
+    // C only has (high) — must not be reached for (low)
+    expect(await getProviderCredentials("codex", exclude, "m(low)")).toBeNull();
+  });
 });
