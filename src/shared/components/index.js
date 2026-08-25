@@ -31,7 +31,7 @@ export { default as CursorAuthModal } from "./CursorAuthModal";
 export { default as IFlowCookieModal } from "./IFlowCookieModal";
 export { default as GitLabAuthModal } from "./GitLabAuthModal";
 export { default as EditConnectionModal } from "./EditConnectionModal";
-export { default as ModelAccessSection } from "./ModelAccessSection";
+export { default as ModelAccessModal } from "./ModelAccessModal";
 export { default as AddCustomEmbeddingModal } from "./AddCustomEmbeddingModal";
 export { default as NoAuthProxyCard } from "./NoAuthProxyCard";
 export { default as SegmentedControl } from "./SegmentedControl";
