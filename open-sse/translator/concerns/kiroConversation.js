@@ -45,6 +45,10 @@ function trimCodePoints(value, limit) {
 }
 
 function uniqueName(rawName, index, usedNames) {
+  // Kiro's tool-name charset is [a-zA-Z0-9_-], so repeated underscores are legal
+  // and must be preserved: MCP tools are named `mcp__<server>__<tool>` and the
+  // response tool_use name has to match what the client declared, otherwise
+  // Claude Code cannot dispatch the call ("tool isn't accessible").
   const cleaned = String(rawName || "")
     .trim()
     .replace(TOOL_NAME_PATTERN, "_")
