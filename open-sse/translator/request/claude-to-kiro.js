@@ -254,9 +254,10 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
     ? (credentials?.providerSpecificData?.profileArn || "")
     : (credentials?.providerSpecificData?.profileArn || resolveDefaultProfileArn(authMethod));
 
-  // The system prompt travels inside the first user turn's content (contentPrefix):
-  // the CodeWhisperer surface rejects a top-level `systemPrompt` with
-  // 400 REQUEST_BODY_INVALID, so the value below is only a replay cache key.
+  // The assembled system text is folded into the first user turn of the
+  // conversation (wrapped in <instructions> tags below). Kiro rejects a
+  // top-level `systemPrompt` with 400 REQUEST_BODY_INVALID, so the value is
+  // also used only as the replay cache key.
   const timestamp = new Date().toISOString();
   const systemPromptParts = [];
   if (thinkingBudget !== null && !usesNativeGptEffort) {
@@ -264,7 +265,9 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
   }
   if (agentic) systemPromptParts.push(KIRO_AGENTIC_SYSTEM_PROMPT);
   const systemInstruction = extractClaudeSystemText(body.system);
-  if (systemInstruction) systemPromptParts.push(systemInstruction);
+  if (systemInstruction) {
+    systemPromptParts.push(`<instructions>\n${systemInstruction}\n</instructions>`);
+  }
   const systemPrompt = systemPromptParts.filter(Boolean).join("\n\n");
   const currentTimeContext = `[Context: Current time is ${timestamp}]`;
   const contentPrefix = [systemPrompt, currentTimeContext].filter(Boolean).join("\n\n");
@@ -336,6 +339,8 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
   };
 
   if (profileArn) payload.profileArn = profileArn;
+  // NOTE: no top-level payload.systemPrompt — Kiro rejects that field (#2989).
+  // The system instruction lives in the frozen first user turn instead (above).
   if (additionalModelRequestFields) {
     payload.additionalModelRequestFields = additionalModelRequestFields;
   }
