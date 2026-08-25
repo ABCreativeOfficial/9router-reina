@@ -143,32 +143,31 @@ describe("getProviderCredentials — per-account model access", () => {
     expect(creds.connectionId).toBe("A");
   });
 
-  it("routes a level-suffixed request to the account granted that level", async () => {
+  it("a level-suffixed request routes on the base model's grant", async () => {
     mocks.getProviderConnections.mockResolvedValue([
-      acc("LOW", ["gpt-5.6-luna(low)"], { priority: 1 }),
-      acc("ALL", ["gpt-5.6-luna"], { priority: 2 }),
+      acc("A", ["gpt-5.6-luna"], { priority: 1 }),
+      acc("B", ["gpt-5.6-sol"], { priority: 2 }),
     ]);
-    // low is granted on both; fill-first takes the top-priority one
-    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna(low)")).connectionId).toBe("LOW");
-    // xhigh is only on the whole-model grant
-    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna(xhigh)")).connectionId).toBe("ALL");
-    // a bare request is barred from the level-only account
-    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna")).connectionId).toBe("ALL");
+    // The suffix is request-time sugar; eligibility follows the base model.
+    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna(low)")).connectionId).toBe("A");
+    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna(xhigh)")).connectionId).toBe("A");
+    expect((await getProviderCredentials("codex", null, "gpt-5.6-luna")).connectionId).toBe("A");
+    expect((await getProviderCredentials("codex", null, "gpt-5.6-sol(xhigh)")).connectionId).toBe("B");
   });
 
-  it("returns null when no account is granted the requested level", async () => {
+  it("returns null when no account grants the requested base model", async () => {
     mocks.getProviderConnections.mockResolvedValue([
-      acc("A", ["gpt-5.6-luna(low)"]),
-      acc("B", ["gpt-5.6-luna(medium)"]),
+      acc("A", ["gpt-5.6-luna"]),
+      acc("B", ["gpt-5.6-luna"]),
     ]);
-    expect(await getProviderCredentials("codex", null, "gpt-5.6-luna(xhigh)")).toBeNull();
+    expect(await getProviderCredentials("codex", null, "gpt-5.6-sol(xhigh)")).toBeNull();
   });
 
-  it("level-suffixed fallback stays inside the accounts granted that level", async () => {
+  it("level-suffixed fallback stays inside the accounts granting that model", async () => {
     mocks.getProviderConnections.mockResolvedValue([
-      acc("A", ["m(low)"], { priority: 1 }),
+      acc("A", ["m"], { priority: 1 }),
       acc("B", ["m"], { priority: 2 }),
-      acc("C", ["m(high)"], { priority: 3 }),
+      acc("C", ["n"], { priority: 3 }),
     ]);
     const exclude = new Set();
     const picked = [];
@@ -178,7 +177,7 @@ describe("getProviderCredentials — per-account model access", () => {
       exclude.add(creds.connectionId);
     }
     expect(picked).toEqual(["A", "B"]);
-    // C only has (high) — must not be reached for (low)
+    // C only has n — must not be reached for m at any level
     expect(await getProviderCredentials("codex", exclude, "m(low)")).toBeNull();
   });
 });

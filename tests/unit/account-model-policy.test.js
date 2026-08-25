@@ -24,6 +24,10 @@ describe("sanitizeEnabledModels", () => {
     expect(sanitizeEnabledModels([" a ", "a", "", "  ", 3, null, "b"])).toEqual(["a", "b"]);
   });
 
+  it("drops level suffixes and dedupes to the base model", () => {
+    expect(sanitizeEnabledModels(["m(low)", "m", "m(xhigh)", "n(high)"])).toEqual(["m", "n"]);
+  });
+
   it("returns [] for non-arrays", () => {
     for (const bad of [undefined, null, "a", 1, {}]) expect(sanitizeEnabledModels(bad)).toEqual([]);
   });
@@ -123,8 +127,8 @@ describe("splitModelLevel", () => {
   });
 });
 
-describe("isConnectionEligibleForModel — per-level allowlist", () => {
-  it("a bare entry grants every level of that model", () => {
+describe("isConnectionEligibleForModel — level suffixes", () => {
+  it("an entry grants its model at every thinking level", () => {
     const c = conn(["gpt-5.6-luna"]);
     expect(isConnectionEligibleForModel(c, "gpt-5.6-luna")).toBe(true);
     expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(xhigh)")).toBe(true);
@@ -133,53 +137,34 @@ describe("isConnectionEligibleForModel — per-level allowlist", () => {
     expect(isConnectionEligibleForModel(c, "gpt-5.6-sol(xhigh)")).toBe(false);
   });
 
-  it("a level entry grants only that level, and rejects the bare request", () => {
+  it("a legacy level-suffixed entry is normalized to its base model", () => {
+    // Older builds could store m(level); it must not act as a hidden level restriction.
     const c = conn(["gpt-5.6-luna(low)"]);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna")).toBe(true);
     expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(low)")).toBe(true);
-    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(xhigh)")).toBe(false);
-    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna")).toBe(false);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(xhigh)")).toBe(true);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-sol")).toBe(false);
   });
 
-  it("unions several level entries", () => {
-    const c = conn(["gpt-5.6-luna(low)", "gpt-5.6-luna(medium)"]);
-    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(low)")).toBe(true);
-    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(medium)")).toBe(true);
-    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(high)")).toBe(false);
-  });
-
-  it("a bare entry alongside a level entry still grants everything", () => {
-    const c = conn(["gpt-5.6-luna", "gpt-5.6-luna(low)"]);
-    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(high)")).toBe(true);
+  it("several level entries of one model collapse to a single grant", () => {
+    expect(getEnabledModels(conn(["m(low)", "m(medium)", "m"]))).toEqual(["m"]);
   });
 
   it("normalizes level suffix and provider prefix together", () => {
-    expect(isConnectionEligibleForModel(conn(["codex/gpt-5.6-luna(low)"]), "gpt-5.6-luna(low)")).toBe(true);
-    expect(isConnectionEligibleForModel(conn(["gpt-5.6-luna(low)"]), "codex/gpt-5.6-luna(low)")).toBe(true);
+    expect(isConnectionEligibleForModel(conn(["codex/gpt-5.6-luna(low)"]), "gpt-5.6-luna(xhigh)")).toBe(true);
+    expect(isConnectionEligibleForModel(conn(["gpt-5.6-luna"]), "codex/gpt-5.6-luna(low)")).toBe(true);
     expect(isConnectionEligibleForModel(conn(["codex/gpt-5.6-luna"]), "gpt-5.6-luna(xhigh)")).toBe(true);
   });
 
-  it("level comparison is case-insensitive on both sides", () => {
-    expect(isConnectionEligibleForModel(conn(["m(XHigh)"]), "m(xhigh)")).toBe(true);
-    expect(isConnectionEligibleForModel(conn(["m(xhigh)"]), "m(XHIGH)")).toBe(true);
-  });
-
-  it("an unrestricted account still ignores levels entirely", () => {
+  it("an unrestricted account ignores levels entirely", () => {
     expect(isConnectionEligibleForModel(conn(undefined), "gpt-5.6-luna(xhigh)")).toBe(true);
   });
 
   it("custom ids containing slashes keep working with a level suffix", () => {
-    const c = conn(["org/llama-3.3(high)"], { provider: "openai-compatible" });
+    const c = conn(["org/llama-3.3"], { provider: "openai-compatible" });
     expect(isConnectionEligibleForModel(c, "org/llama-3.3(high)")).toBe(true);
-    expect(isConnectionEligibleForModel(c, "org/llama-3.3(low)")).toBe(false);
-  });
-
-  it("restricts one account to a single level while another serves all", () => {
-    const pool = [
-      conn(["m"], { id: "A" }),
-      conn(["m(low)"], { id: "B" }),
-    ];
-    expect(pool.filter((c) => isConnectionEligibleForModel(c, "m(xhigh)")).map((c) => c.id)).toEqual(["A"]);
-    expect(pool.filter((c) => isConnectionEligibleForModel(c, "m(low)")).map((c) => c.id)).toEqual(["A", "B"]);
+    expect(isConnectionEligibleForModel(c, "org/llama-3.3(low)")).toBe(true);
+    expect(isConnectionEligibleForModel(c, "org/llama-3.2(low)")).toBe(false);
   });
 });
 
