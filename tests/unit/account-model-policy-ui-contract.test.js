@@ -1,64 +1,65 @@
-import { describe, expect, it } from "vitest";
+import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
-import { splitModelLevel, isConnectionEligibleForModel } from "@/sse/services/accountModelPolicy.js";
+import { sanitizeEnabledModels, isConnectionEligibleForModel } from "@/sse/services/accountModelPolicy.js";
 
-// The UI has no DOM harness in this suite, so assert the contract it depends on:
-// every entry the picker can generate must be accepted by the router's matcher,
-// and the picker's level source must be the same one the router's suffix parser uses.
-const SOURCE = readFileSync(
-  new URL("../../src/shared/components/ModelAccessSection.js", import.meta.url),
-  "utf8"
-);
+// No DOM harness in this suite, so assert the wiring contract the UI depends on.
+const read = (p) => readFileSync(new URL(p, import.meta.url), "utf8");
+const MODAL = read("../../src/shared/components/ModelAccessModal.js");
+const ROW = read("../../src/app/(dashboard)/dashboard/providers/[id]/ConnectionRow.js");
+const PAGE = read("../../src/app/(dashboard)/dashboard/providers/[id]/page.js");
+const EDIT = read("../../src/shared/components/EditConnectionModal.js");
 
-describe("ModelAccessSection ↔ policy contract", () => {
-  it("reads its level options from the shared thinkingLevels source", () => {
-    expect(SOURCE).toContain('from "open-sse/providers/thinkingLevels.js"');
+describe("Model Access modal wiring", () => {
+  it("is a standalone modal, not part of Edit Connection", () => {
+    expect(EDIT).not.toContain("ModelAccess");
+    expect(EDIT).not.toContain("enabledModels");
+    expect(MODAL).toContain("export default function ModelAccessModal");
   });
 
-  it("pulls custom models from the existing custom-models API, not a second catalog", () => {
-    expect(SOURCE).toContain("/api/models/custom");
-    expect(SOURCE).toContain("providerAlias");
+  it("is opened from its own row action beside Edit", () => {
+    expect(ROW).toContain("onEditModelAccess");
+    expect(ROW).toContain("Models");
+    expect(PAGE).toContain("onEditModelAccess={");
+    expect(PAGE).toContain("<ModelAccessModal");
   });
 
-  it("still discovers per-connection models through the existing endpoint", () => {
-    expect(SOURCE).toContain("/api/providers/${connection.id}/models");
+  it("shares one catalog with the Available Models grid", () => {
+    expect(PAGE).toContain("buildProviderModelCatalog");
+    // The grid reads the same object the modal is handed.
+    expect(PAGE).toContain("modelCatalog.entries");
+    expect(PAGE).toContain("customRows: customModelRows");
   });
 
-  it("every entry the picker generates for a real model is routable", () => {
-    const providerId = "codex";
-    const base = "gpt-5.6-luna";
-    const levels = getThinkingLevels(providerId, base).filter((l) => l !== "none");
-    expect(levels.length).toBeGreaterThan(0);
+  it("offers no level-variant UI", () => {
+    expect(MODAL).not.toContain("getThinkingLevels");
+    expect(MODAL).not.toMatch(/levelIds|expandLevels/);
+  });
 
-    // Same expansion the component performs: bare id + one entry per level.
-    const entries = [base, ...levels.map((l) => `${base}(${l})`)];
+  it("saves only enabledModels, letting the API merge preserve other keys", () => {
+    expect(MODAL).toContain("providerSpecificData: { enabledModels: value }");
+  });
+});
 
-    for (const entry of entries) {
-      const conn = { provider: providerId, providerSpecificData: { enabledModels: [entry] } };
-      const { level } = splitModelLevel(entry);
-      // The entry always grants exactly the request it was generated for.
-      expect(isConnectionEligibleForModel(conn, entry)).toBe(true);
-      if (level === null) {
-        // A bare grant covers every level.
-        for (const l of levels) expect(isConnectionEligibleForModel(conn, `${base}(${l})`)).toBe(true);
-      } else {
-        // A level grant covers only itself.
-        expect(isConnectionEligibleForModel(conn, base)).toBe(false);
-        for (const other of levels.filter((l) => l !== level)) {
-          expect(isConnectionEligibleForModel(conn, `${base}(${other})`)).toBe(false);
-        }
-      }
+describe("policy accepts what the modal can produce", () => {
+  it("a bare model entry routes at every thinking level", () => {
+    const conn = { provider: "codex", providerSpecificData: { enabledModels: ["gpt-5.6-luna"] } };
+    for (const req of ["gpt-5.6-luna", "gpt-5.6-luna(low)", "gpt-5.6-luna(xhigh)", "gpt-5.6-luna(max)"]) {
+      expect(isConnectionEligibleForModel(conn, req)).toBe(true);
     }
+    expect(isConnectionEligibleForModel(conn, "gpt-5.6-sol")).toBe(false);
   });
 
-  it("a custom model id with no known levels is still routable as a bare entry", () => {
-    const conn = {
-      provider: "codex",
-      providerSpecificData: { enabledModels: ["gpt-5.6-luna-xhigh"] },
-    };
+  it("a custom id the registry does not know is routable", () => {
+    const conn = { provider: "codex", providerSpecificData: { enabledModels: ["gpt-5.6-luna-xhigh"] } };
     expect(isConnectionEligibleForModel(conn, "gpt-5.6-luna-xhigh")).toBe(true);
     expect(isConnectionEligibleForModel(conn, "gpt-5.6-luna-xhigh(low)")).toBe(true);
     expect(isConnectionEligibleForModel(conn, "gpt-5.6-luna")).toBe(false);
+  });
+
+  it("the modal's baseId normalization matches the policy's", () => {
+    // Both drop a trailing (level); a legacy stored entry converges on the same base.
+    expect(sanitizeEnabledModels(["m(low)", "m(high)"])).toEqual(["m"]);
+    const conn = { provider: "codex", providerSpecificData: { enabledModels: ["m(low)"] } };
+    expect(isConnectionEligibleForModel(conn, "m(xhigh)")).toBe(true);
   });
 });
