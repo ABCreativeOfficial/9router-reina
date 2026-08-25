@@ -242,9 +242,15 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
     ? (credentials?.providerSpecificData?.profileArn || "")
     : (credentials?.providerSpecificData?.profileArn || resolveDefaultProfileArn(authMethod));
 
-  // Kiro CLI/KAS sends system prompt as top-level `systemPrompt`. Keep a
-  // content fallback too because the CodeWhisperer surface does not always
-  // enforce top-level systemPrompt for direct calls.
+  // Kiro upstream rejects a top-level `systemPrompt` field with 400
+  // REQUEST_BODY_INVALID ("Improperly formed request") — see decolua/9router
+  // #2989. So the assembled system text is NEVER sent as a top-level payload
+  // field. Instead it is folded into the first user turn of the conversation
+  // (frozen msg0 via session replay below, wrapped in <instructions> tags —
+  // the same pattern the OpenAI→Kiro route uses and Kiro CLI itself honours).
+  // `agentMode`/`agentContinuationId`/`agentTaskType`/`conversationId` remain
+  // valid: the exact same request *without* `system` succeeds (200) per #2989,
+  // so the session fields are preserved for multi-turn continuity.
   const timestamp = new Date().toISOString();
   const systemPromptParts = [];
   if (thinkingBudget !== null && !usesNativeGptEffort) {
@@ -252,7 +258,9 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
   }
   if (agentic) systemPromptParts.push(KIRO_AGENTIC_SYSTEM_PROMPT);
   const systemInstruction = extractClaudeSystemText(body.system);
-  if (systemInstruction) systemPromptParts.push(systemInstruction);
+  if (systemInstruction) {
+    systemPromptParts.push(`<instructions>\n${systemInstruction}\n</instructions>`);
+  }
   const systemPrompt = systemPromptParts.filter(Boolean).join("\n\n");
   const currentTimeContext = `[Context: Current time is ${timestamp}]`;
   const contentPrefix = [systemPrompt, currentTimeContext].filter(Boolean).join("\n\n");
@@ -327,6 +335,8 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
   };
 
   if (profileArn) payload.profileArn = profileArn;
+  // NOTE: no top-level payload.systemPrompt — Kiro rejects that field (#2989).
+  // The system instruction lives in the frozen first user turn instead (above).
   if (additionalModelRequestFields) {
     payload.additionalModelRequestFields = additionalModelRequestFields;
   }

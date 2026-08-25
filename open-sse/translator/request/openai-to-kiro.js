@@ -340,9 +340,14 @@ export function openaiToKiroRequest(model, body, stream, credentials) {
 
   const timestamp = new Date().toISOString();
 
-  // Kiro CLI/KAS sends these as top-level systemPrompt. Keep a content fallback
-  // too because the CodeWhisperer surface does not always enforce top-level
-  // systemPrompt for direct calls.
+  // Kiro upstream rejects a top-level `systemPrompt` field with 400
+  // REQUEST_BODY_INVALID ("Improperly formed request") — see decolua/9router
+  // #2989. The assembled system/thinking text is NEVER sent as a top-level
+  // field; it is folded into the frozen first user turn (msg0) via session
+  // replay below. Session fields (agentMode / agentContinuationId /
+  // agentTaskType / conversationId) are valid upstream and preserved for
+  // multi-turn continuity. (OpenAI `system` role messages are already wrapped
+  // in <instructions> and merged into user turns by convertMessages above.)
   const systemPromptParts = [];
   if (thinkingBudget !== null && !usesNativeGptEffort) {
     systemPromptParts.push(buildThinkingSystemPrefix(thinkingBudget));
@@ -420,6 +425,7 @@ export function openaiToKiroRequest(model, body, stream, credentials) {
   if (profileArn) {
     payload.profileArn = profileArn;
   }
+  // NOTE: no top-level payload.systemPrompt — Kiro rejects that field (#2989).
   if (additionalModelRequestFields) {
     payload.additionalModelRequestFields = additionalModelRequestFields;
   }

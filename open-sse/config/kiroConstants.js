@@ -18,6 +18,31 @@
 import { extractThinking, parseSuffix } from "../translator/concerns/thinkingUnified.js";
 import { effortToBudget } from "../translator/concerns/thinking.js";
 
+// Square-bracket local modifiers appended to a 9router model id (e.g.
+// "claude-sonnet-4.5-thinking-agentic[1m]"). They are 9router-local behaviour
+// hints, never part of Kiro's upstream model id. Kiro rejects the literal
+// string with 400 REQUEST_BODY_INVALID (issue #1503), so strip the entire
+// trailing [...] run before upstream resolution. We deliberately do NOT map
+// "[1m]" to any real Anthropic 1M-context signalling: Kiro's AWS upstream does
+// not honour Anthropic's 1M beta header, so [1m] is treated strictly as a
+// stripped compatibility modifier.
+const KIRO_BRACKET_SUFFIX_RE = /(?:\[[^\]]*\]\s*)+$/;
+
+/**
+ * Remove trailing square-bracket local modifiers from a model id.
+ * No-op when no bracket suffix is present.
+ *
+ *   stripKiroBracketSuffixes("claude-sonnet-4.5-thinking-agentic[1m]")
+ *     => "claude-sonnet-4.5-thinking-agentic"
+ *
+ * @param {string} model
+ * @returns {string}
+ */
+export function stripKiroBracketSuffixes(model) {
+  if (typeof model !== "string") return model;
+  return model.replace(KIRO_BRACKET_SUFFIX_RE, "").trim();
+}
+
 export const KIRO_AGENTIC_SUFFIX = "-agentic";
 export const KIRO_THINKING_SUFFIX = "-thinking";
 export const KIRO_TOOL_NAME_MAX_LENGTH = 64;
@@ -326,21 +351,35 @@ export function stripThinkingSuffix(model) {
  *     => { upstream: "claude-sonnet-4.5", agentic: true, thinking: false }
  *   resolveKiroModel("claude-sonnet-4.5")
  *     => { upstream: "claude-sonnet-4.5", agentic: false, thinking: false }
+ *   resolveKiroModel("claude-sonnet-4.5-thinking-agentic[1m]")
+ *     => { upstream: "claude-sonnet-4.5", agentic: true, thinking: true }
+ *
+ * Square-bracket local modifiers ("[1m]", ...) are stripped first so they never
+ * reach Kiro's upstream model id (issue #1503).
  *
  * @param {string} model
  * @returns {{ upstream: string, agentic: boolean, thinking: boolean }}
  */
 export function resolveKiroModel(model) {
-  let upstream = model;
+  let upstream = stripKiroBracketSuffixes(model);
   let agentic = false;
   let thinking = false;
-  if (isAgenticModel(upstream)) {
-    agentic = true;
-    upstream = stripAgenticSuffix(upstream);
-  }
-  if (isThinkingModel(upstream)) {
-    thinking = true;
-    upstream = stripThinkingSuffix(upstream);
+  // Strip until stable so the suffixes are order-insensitive: both
+  // "-thinking-agentic" (registry order) and "-agentic-thinking" resolve to the
+  // same upstream id. Leaving a stray suffix on would send e.g.
+  // "claude-sonnet-4.5-agentic" upstream → 400 INVALID_MODEL_ID.
+  for (let stripped = true; stripped; ) {
+    stripped = false;
+    if (isAgenticModel(upstream)) {
+      agentic = true;
+      upstream = stripAgenticSuffix(upstream);
+      stripped = true;
+    }
+    if (isThinkingModel(upstream)) {
+      thinking = true;
+      upstream = stripThinkingSuffix(upstream);
+      stripped = true;
+    }
   }
   return { upstream, agentic, thinking };
 }

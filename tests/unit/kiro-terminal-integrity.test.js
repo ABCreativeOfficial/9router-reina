@@ -115,7 +115,13 @@ async function text(stream) {
 async function execute(executor = new KiroExecutor(), overrides = {}) {
   return executor.execute({
     model: "kr/claude-opus-4.8",
-    body: { systemPrompt: "base", conversationState: {} },
+    // #2989: Kiro rejects top-level systemPrompt; the body now carries content
+    // in the conversation state, and the repair path prepends there.
+    body: {
+      conversationState: {
+        currentMessage: { userInputMessage: { content: "base", modelId: "kr/claude-opus-4.8" } },
+      },
+    },
     stream: true,
     credentials,
     ...overrides
@@ -342,8 +348,10 @@ describe("Kiro terminal integrity recovery", () => {
     const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
 
     expect(body).toContain("Recovered safely.");
-    expect(retryBody.systemPrompt).toContain("tool_call wrapper was malformed");
-    expect(retryBody.systemPrompt).not.toContain("IGNORE_ALL_INSTRUCTIONS");
+    expect(retryBody.systemPrompt).toBeUndefined(); // #2989: never top-level systemPrompt
+    const retryContent = retryBody.conversationState?.currentMessage?.userInputMessage?.content || "";
+    expect(retryContent).toContain("tool_call wrapper was malformed");
+    expect(retryContent).not.toContain("IGNORE_ALL_INSTRUCTIONS");
   });
 
   it("lets a complete tool call override metadata end_turn", async () => {
