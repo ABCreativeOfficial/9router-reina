@@ -29,8 +29,10 @@ describe("OpenAI → Kiro", () => {
     expect(out.additionalModelRequestFields).toEqual({
       reasoning: { effort },
     });
-    expect(out.systemPrompt || "").not.toContain("<thinking_mode>");
-    expect(out.systemPrompt || "").not.toContain("<max_thinking_length>");
+    expect(out.systemPrompt).toBeUndefined(); // #2989: Kiro rejects top-level systemPrompt
+    const effortContent = out.conversationState.currentMessage.userInputMessage.content;
+    expect(effortContent).not.toContain("<thinking_mode>");
+    expect(effortContent).not.toContain("<max_thinking_length>");
   });
 
   // openai-to-kiro.js — safeJSONParse guards bad tool-call JSON (fixed in PR #1582)

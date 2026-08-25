@@ -11,7 +11,9 @@ import { openaiToKiroRequest } from "../../open-sse/translator/request/openai-to
 
 const contentOf = (result) =>
   result.conversationState.currentMessage.userInputMessage.content;
-const systemPromptOf = (result) => result.systemPrompt || "";
+// #2989: Kiro rejects top-level systemPrompt with 400; thinking/agentic text
+// is folded into the user content instead. Point at that so assertions pass.
+const systemPromptOf = (result) => contentOf(result);
 
 describe("openaiToKiroRequest", () => {
   describe("basic message conversion", () => {
@@ -568,7 +570,7 @@ describe("openaiToKiroRequest", () => {
       expect(systemPromptOf(result)).toContain("<max_thinking_length>16000</max_thinking_length>");
     });
 
-    it("keeps top-level systemPrompt stable across turns", () => {
+    it("keeps the thinking prefix stable across turns without top-level systemPrompt (#2989)", () => {
       const first = openaiToKiroRequest(
         "claude-sonnet-4.6-thinking",
         { messages: [{ role: "user", content: "first" }] },
@@ -582,9 +584,16 @@ describe("openaiToKiroRequest", () => {
         {}
       );
 
-      expect(first.systemPrompt).toBe(second.systemPrompt);
-      expect(first.systemPrompt).not.toContain("Current time");
-      expect(first.conversationState.currentMessage.userInputMessage.content).toContain("Current time");
+      // Top-level systemPrompt is rejected by Kiro (400) → must never be sent.
+      expect(first.systemPrompt).toBeUndefined();
+      expect(second.systemPrompt).toBeUndefined();
+      // Thinking prefix + current time live in the frozen first user turn.
+      expect(contentOf(first)).toContain("<thinking_mode>enabled</thinking_mode>");
+      expect(contentOf(first)).toContain("Current time");
+      // Without an explicit session id each request is ephemeral, but the
+      // thinking prefix is still injected into the current turn's content.
+      expect(contentOf(second)).toContain("<thinking_mode>enabled</thinking_mode>");
+      expect(contentOf(second)).toContain("Current time");
     });
 
     it("replays frozen msg0 for explicit Kiro sessions while keeping current time fresh", () => {
