@@ -8,7 +8,6 @@ import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import Select from "@/shared/components/Select";
-import ModelAccessSection from "@/shared/components/ModelAccessSection";
 
 export default function EditConnectionModal({ isOpen, connection, proxyPools, onSave, onClose }) {
   const [formData, setFormData] = useState({
@@ -24,7 +23,6 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   });
   const [cloudflareData, setCloudflareData] = useState({ accountId: "" });
   const [region, setRegion] = useState("");
-  const [enabledModels, setEnabledModels] = useState([]);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [validating, setValidating] = useState(false);
@@ -58,11 +56,6 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       }
       setTestResult(null);
       setValidationResult(null);
-      setEnabledModels(
-        Array.isArray(connection.providerSpecificData?.enabledModels)
-          ? connection.providerSpecificData.enabledModels.filter((m) => typeof m === "string" && m.trim() !== "")
-          : []
-      );
     }
   }, [connection]);
 
@@ -179,13 +172,6 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
         updates.providerSpecificData = buildRegionSpecificData();
       }
 
-      // Per-account model access. The API merges providerSpecificData, so sending
-      // only this key preserves every other provider-specific value.
-      updates.providerSpecificData = {
-        ...(updates.providerSpecificData || {}),
-        enabledModels,
-      };
-
       await onSave(updates);
     } finally {
       setSaving(false);
@@ -286,12 +272,6 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
             options={providerRegions.map((r) => ({ value: r.id, label: r.label }))}
           />
         )}
-
-        <ModelAccessSection
-          connection={connection}
-          value={enabledModels}
-          onChange={setEnabledModels}
-        />
 
         {!isCompatible && !isAzure && !isCloudflareAi && (
           <div className="flex items-center gap-3">
