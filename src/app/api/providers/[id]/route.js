@@ -5,6 +5,23 @@ import {
   updateProviderConnection,
   deleteProviderConnection,
 } from "@/models";
+import { sanitizeEnabledModels, MAX_ENABLED_MODELS } from "@/sse/services/accountModelPolicy.js";
+
+// Per-account model allowlist. `null`/`[]` clears the restriction (all models).
+function normalizeEnabledModelsUpdate(providerSpecificData) {
+  if (!providerSpecificData || !Object.prototype.hasOwnProperty.call(providerSpecificData, "enabledModels")) {
+    return { hasEnabledModelsField: false };
+  }
+  const raw = providerSpecificData.enabledModels;
+  if (raw === null || raw === undefined) return { hasEnabledModelsField: true, enabledModels: [] };
+  if (!Array.isArray(raw)) {
+    return { hasEnabledModelsField: true, error: "enabledModels must be an array of model id strings" };
+  }
+  if (raw.length > MAX_ENABLED_MODELS) {
+    return { hasEnabledModelsField: true, error: `enabledModels exceeds ${MAX_ENABLED_MODELS} entries` };
+  }
+  return { hasEnabledModelsField: true, enabledModels: sanitizeEnabledModels(raw) };
+}
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -116,6 +133,11 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: proxyPoolResult.error }, { status: 400 });
     }
 
+    const enabledModelsResult = normalizeEnabledModelsUpdate(providerSpecificData);
+    if (enabledModelsResult.error) {
+      return NextResponse.json({ error: enabledModelsResult.error }, { status: 400 });
+    }
+
     const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (priority !== undefined) updateData.priority = priority;
@@ -151,6 +173,14 @@ export async function PUT(request, { params }) {
           delete updateData.providerSpecificData.proxyPoolId;
         } else {
           updateData.providerSpecificData.proxyPoolId = proxyPoolResult.proxyPoolId;
+        }
+      }
+
+      if (enabledModelsResult.hasEnabledModelsField) {
+        if (enabledModelsResult.enabledModels.length === 0) {
+          delete updateData.providerSpecificData.enabledModels;
+        } else {
+          updateData.providerSpecificData.enabledModels = enabledModelsResult.enabledModels;
         }
       }
     }
