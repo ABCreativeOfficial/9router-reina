@@ -51,7 +51,12 @@ const idsFor = async () => {
 };
 
 describe("/v1/models — per-account policy visibility", () => {
-  beforeEach(() => vi.clearAllMocks());
+  // clearAllMocks() clears calls but not implementations, so re-assert the
+  // no-disabled-models default rather than inheriting a prior test's override.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getDisabledModels.mockResolvedValue({});
+  });
 
   it("unrestricted accounts expose the full static catalog (no regression)", async () => {
     mocks.getProviderConnections.mockResolvedValue([conn("A")]);
@@ -80,5 +85,10 @@ describe("/v1/models — per-account policy visibility", () => {
     mocks.getProviderConnections.mockResolvedValue([conn("A", [MODEL_A, MODEL_B])]);
     mocks.getDisabledModels.mockResolvedValue({ [OUTPUT_ALIAS]: [MODEL_A] });
     expect(await idsFor()).toEqual([qualified(MODEL_B)]);
+  });
+
+  it("a level-only allowlist still lists the base model", async () => {
+    mocks.getProviderConnections.mockResolvedValue([conn("A", [`${MODEL_A}(low)`, `${MODEL_A}(high)`])]);
+    expect(await idsFor()).toEqual([qualified(MODEL_A)]);
   });
 });

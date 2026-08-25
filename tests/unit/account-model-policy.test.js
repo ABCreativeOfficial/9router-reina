@@ -5,6 +5,7 @@ import {
   hasModelRestriction,
   isConnectionEligibleForModel,
   collectProviderModelVisibility,
+  splitModelLevel,
   MAX_ENABLED_MODELS,
 } from "@/sse/services/accountModelPolicy.js";
 
@@ -106,6 +107,82 @@ describe("isConnectionEligibleForModel", () => {
   });
 });
 
+describe("splitModelLevel", () => {
+  it("splits a level suffix and lowercases it", () => {
+    expect(splitModelLevel("gpt-5.6-luna(xhigh)")).toEqual({ base: "gpt-5.6-luna", level: "xhigh" });
+    expect(splitModelLevel(" gpt-5.6-luna ( XHigh ) ")).toEqual({ base: "gpt-5.6-luna", level: "xhigh" });
+  });
+
+  it("returns a null level when no suffix is present", () => {
+    expect(splitModelLevel("gpt-5.6-luna")).toEqual({ base: "gpt-5.6-luna", level: null });
+    expect(splitModelLevel(undefined)).toEqual({ base: "", level: null });
+  });
+
+  it("leaves an id whose parens are not a trailing suffix alone", () => {
+    expect(splitModelLevel("weird(a)b")).toEqual({ base: "weird(a)b", level: null });
+  });
+});
+
+describe("isConnectionEligibleForModel — per-level allowlist", () => {
+  it("a bare entry grants every level of that model", () => {
+    const c = conn(["gpt-5.6-luna"]);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna")).toBe(true);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(xhigh)")).toBe(true);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(low)")).toBe(true);
+    // still a different model
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-sol(xhigh)")).toBe(false);
+  });
+
+  it("a level entry grants only that level, and rejects the bare request", () => {
+    const c = conn(["gpt-5.6-luna(low)"]);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(low)")).toBe(true);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(xhigh)")).toBe(false);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna")).toBe(false);
+  });
+
+  it("unions several level entries", () => {
+    const c = conn(["gpt-5.6-luna(low)", "gpt-5.6-luna(medium)"]);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(low)")).toBe(true);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(medium)")).toBe(true);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(high)")).toBe(false);
+  });
+
+  it("a bare entry alongside a level entry still grants everything", () => {
+    const c = conn(["gpt-5.6-luna", "gpt-5.6-luna(low)"]);
+    expect(isConnectionEligibleForModel(c, "gpt-5.6-luna(high)")).toBe(true);
+  });
+
+  it("normalizes level suffix and provider prefix together", () => {
+    expect(isConnectionEligibleForModel(conn(["codex/gpt-5.6-luna(low)"]), "gpt-5.6-luna(low)")).toBe(true);
+    expect(isConnectionEligibleForModel(conn(["gpt-5.6-luna(low)"]), "codex/gpt-5.6-luna(low)")).toBe(true);
+    expect(isConnectionEligibleForModel(conn(["codex/gpt-5.6-luna"]), "gpt-5.6-luna(xhigh)")).toBe(true);
+  });
+
+  it("level comparison is case-insensitive on both sides", () => {
+    expect(isConnectionEligibleForModel(conn(["m(XHigh)"]), "m(xhigh)")).toBe(true);
+    expect(isConnectionEligibleForModel(conn(["m(xhigh)"]), "m(XHIGH)")).toBe(true);
+  });
+
+  it("an unrestricted account still ignores levels entirely", () => {
+    expect(isConnectionEligibleForModel(conn(undefined), "gpt-5.6-luna(xhigh)")).toBe(true);
+  });
+
+  it("custom ids containing slashes keep working with a level suffix", () => {
+    const c = conn(["org/llama-3.3(high)"], { provider: "openai-compatible" });
+    expect(isConnectionEligibleForModel(c, "org/llama-3.3(high)")).toBe(true);
+    expect(isConnectionEligibleForModel(c, "org/llama-3.3(low)")).toBe(false);
+  });
+
+  it("restricts one account to a single level while another serves all", () => {
+    const pool = [
+      conn(["m"], { id: "A" }),
+      conn(["m(low)"], { id: "B" }),
+    ];
+    expect(pool.filter((c) => isConnectionEligibleForModel(c, "m(xhigh)")).map((c) => c.id)).toEqual(["A"]);
+    expect(pool.filter((c) => isConnectionEligibleForModel(c, "m(low)")).map((c) => c.id)).toEqual(["A", "B"]);
+  });
+});
+
 describe("collectProviderModelVisibility", () => {
   it("one unrestricted account keeps the full catalog visible", () => {
     const v = collectProviderModelVisibility([conn(["sol"]), conn(undefined)]);
@@ -116,6 +193,12 @@ describe("collectProviderModelVisibility", () => {
     const v = collectProviderModelVisibility([conn(["sol", "a"]), conn(["a", "b"])]);
     expect(v.allRestricted).toBe(true);
     expect(v.allowedUnion).toEqual(["sol", "a", "b"]);
+  });
+
+  it("drops level suffixes and dedupes to the base model id", () => {
+    const v = collectProviderModelVisibility([conn(["m(low)", "m(high)"]), conn(["m", "n(xhigh)"])]);
+    expect(v.allRestricted).toBe(true);
+    expect(v.allowedUnion).toEqual(["m", "n"]);
   });
 
   it("no connections is not a restriction", () => {
