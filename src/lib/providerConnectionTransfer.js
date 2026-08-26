@@ -102,6 +102,7 @@ export function validateImportPayload(payload, expectedProvider) {
 }
 
 const OAUTH_AUTH_TYPES = ["oauth", "access_token"];
+const API_KEY_AUTH_TYPES = ["apikey", "api_key", "cookie"];
 
 /**
  * Turn one exported record into `createProviderConnection` input.
@@ -161,8 +162,12 @@ function checkCredentials(data, authType, provider) {
     }
     return null;
   }
-  if (authType === "apikey" || authType === "cookie") {
-    if (!data.apiKey) return `Connection has no ${authType === "cookie" ? "cookie value" : "apiKey"}`;
+  if (API_KEY_AUTH_TYPES.includes(authType)) {
+    // Some OAuth-derived providers persist an API-key-shaped credential in
+    // accessToken while naming the auth type api_key.
+    if (!data.apiKey && !data.accessToken) {
+      return `Connection has no ${authType === "cookie" ? "cookie value" : "apiKey"}`;
+    }
     return null;
   }
   return null;
@@ -181,7 +186,7 @@ export function connectionIdentityKey(conn) {
     const account = psd.chatgptAccountId || psd.username || "";
     return `oauth|${conn.email}|${account}`;
   }
-  if (authType === "apikey" || authType === "cookie") {
+  if (API_KEY_AUTH_TYPES.includes(authType)) {
     if (!conn.name) return null;
     return `${authType}|${conn.name}`;
   }

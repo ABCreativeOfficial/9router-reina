@@ -170,6 +170,29 @@ describe("prepareConnectionForImport", () => {
     expect(data.providerSpecificData.enabledModels).toEqual(["a"]);
   });
 
+  it("round-trips GoRouter inference and management credentials", () => {
+    const src = {
+      id: "gr-1",
+      provider: "gorouter",
+      authType: "apikey",
+      name: "GoRouter A",
+      apiKey: "inference-secret",
+      accessToken: "management-secret",
+      providerSpecificData: { userId: "123", enabledModels: ["model-a"] },
+    };
+    const exported = serializeConnectionForExport(src);
+    const { data } = prepareConnectionForImport(exported, "gorouter");
+    expect(data).toMatchObject({
+      provider: "gorouter",
+      authType: "apikey",
+      apiKey: "inference-secret",
+      accessToken: "management-secret",
+      providerSpecificData: { userId: "123", enabledModels: ["model-a"] },
+    });
+    expect(redactConnection(data)).not.toHaveProperty("apiKey");
+    expect(redactConnection(data)).not.toHaveProperty("accessToken");
+  });
+
   it("preserves isActive:false", () => {
     const { data } = prepareConnectionForImport({ authType: "apikey", name: "n", apiKey: "k", isActive: false }, "groq");
     expect(data.isActive).toBe(false);
@@ -194,6 +217,16 @@ describe("prepareConnectionForImport", () => {
 
   it("rejects a non-object providerSpecificData", () => {
     expect(prepareConnectionForImport({ authType: "oauth", accessToken: "at", providerSpecificData: "x" }, "codex").error).toMatch(/providerSpecificData/);
+  });
+
+  it("round-trips api_key connections whose credential is stored as accessToken", () => {
+    const { data, error } = prepareConnectionForImport({
+      authType: "api_key",
+      name: "Kiro key",
+      accessToken: "key-secret",
+    }, "kiro");
+    expect(error).toBeUndefined();
+    expect(data.accessToken).toBe("key-secret");
   });
 
   it("allows ollama-local with no credential", () => {
