@@ -19,6 +19,7 @@ import { resolveCommandCodeModels } from "open-sse/services/commandcodeModels.js
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import codexProvider from "open-sse/providers/registry/codex.js";
+import { fetchGoRouterModels } from "open-sse/services/gorouter.js";
 
 /**
  * Fill in what the provider omitted, in the field names the pickers already read.
@@ -560,6 +561,24 @@ const PROVIDER_MODELS_CONFIG = {
       parseFn: parseGeminiCliModels,
       errorLabel: "Failed to fetch Gemini CLI models"
     })
+  },
+  gorouter: {
+    customResolver: async (connection) => {
+      const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+      const result = await fetchGoRouterModels(
+        connection.accessToken,
+        connection.providerSpecificData?.userId,
+        {
+          connectionProxyEnabled: proxy.connectionProxyEnabled === true,
+          connectionProxyUrl: proxy.connectionProxyUrl || "",
+          connectionNoProxy: proxy.connectionNoProxy || "",
+          vercelRelayUrl: proxy.vercelRelayUrl || "",
+          strictProxy: proxy.strictProxy === true,
+        },
+      );
+      if (!result.ok) return { error: result.message, status: result.status };
+      return { models: result.models };
+    },
   },
   "grok-cli": {
     customResolver: async (connection) => {

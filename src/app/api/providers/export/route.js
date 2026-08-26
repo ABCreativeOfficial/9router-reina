@@ -56,8 +56,7 @@ export async function POST(request) {
       filename: buildExportFilename(provider),
       export: buildExportPayload(provider, selected),
     });
-  } catch (error) {
-    console.log("Error exporting connections:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to export connections" }, { status: 500 });
   }
 }
