@@ -235,6 +235,34 @@ describe("dashboard guard local-only access", () => {
     expect(response.body.error).toBe("Local only: CLI token required");
   });
 
+  it("keeps GoRouter credential bootstrap local-only", async () => {
+    const remote = await proxy(request("/api/providers/gorouter/bootstrap", {
+      host: "router.example.com",
+    }));
+    expect(remote.status).toBe(403);
+
+    const local = await proxy(request("/api/providers/gorouter/bootstrap", {
+      host: "router.example.com",
+      "x-9r-cli-token": "cli-token",
+    }));
+    expect(local).toBe(mocks.nextResponse);
+  });
+
+  it("protects connection export and import when login is disabled", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+
+    for (const pathname of ["/api/providers/export", "/api/providers/import"]) {
+      const remote = await proxy(request(pathname, { host: "router.example.com" }));
+      expect(remote.status).toBe(401);
+
+      const cli = await proxy(request(pathname, {
+        host: "router.example.com",
+        "x-9r-cli-token": "cli-token",
+      }));
+      expect(cli).toBe(mocks.nextResponse);
+    }
+  });
+
   it("rejects local-only route on loopback when requireLogin=true and no JWT", async () => {
     const response = await proxy(localRequest("/api/mcp/filesystem/sse", {
       host: "localhost:20128",
@@ -283,6 +311,55 @@ describe("dashboard guard local-only access", () => {
       "x-9r-cli-token": "cli-token",
     }));
 
+    expect(response).toBe(mocks.nextResponse);
+  });
+});
+
+describe("dashboard guard credential-transfer access", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NINEROUTER_PEER_TOKEN = PEER_TOKEN;
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.verifyDashboardAuthToken.mockResolvedValue(false);
+  });
+
+  it.each(["/api/providers/export", "/api/providers/import"])(
+    "rejects remote unauthenticated %s even when dashboard login is disabled",
+    async (pathname) => {
+      const response = await proxy(request(pathname, { host: "router.example.com" }));
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe("Unauthorized");
+    }
+  );
+
+  it("allows local browser export when dashboard login is disabled", async () => {
+    const response = await proxy(localRequest("/api/providers/export", {
+      host: "localhost:20128",
+      origin: "http://localhost:20128",
+    }));
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("rejects a cross-origin local export in no-login mode", async () => {
+    const response = await proxy(localRequest("/api/providers/export", {
+      host: "localhost:20128",
+      origin: "https://evil.example.com",
+    }));
+    expect(response.status).toBe(401);
+  });
+
+  it("allows remote export with a valid dashboard session", async () => {
+    mocks.verifyDashboardAuthToken.mockResolvedValue(true);
+    const response = await proxy(request("/api/providers/export", { host: "router.example.com" }));
+    expect(response).toBe(mocks.nextResponse);
+  });
+
+  it("allows remote import with the local CLI token", async () => {
+    const response = await proxy(request("/api/providers/import", {
+      host: "router.example.com",
+      "x-9r-cli-token": "cli-token",
+    }));
     expect(response).toBe(mocks.nextResponse);
   });
 });

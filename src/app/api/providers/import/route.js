@@ -110,15 +110,14 @@ export async function POST(request) {
         if (key) existingKeys.add(key);
         results.push({ index: i, ok: true, id: created?.id });
         success++;
-      } catch (e) {
-        results.push({ index: i, ok: false, error: e?.message || "Failed to create connection" });
+      } catch {
+        results.push({ index: i, ok: false, error: "Failed to create connection" });
         failed++;
       }
     }
 
     return NextResponse.json({ success, failed, skipped, results });
-  } catch (error) {
-    console.log("Error importing connections:", error?.message || error);
+  } catch {
     return NextResponse.json({ error: "Failed to import connections" }, { status: 500 });
   }
 }
