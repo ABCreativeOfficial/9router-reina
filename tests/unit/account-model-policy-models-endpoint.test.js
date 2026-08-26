@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getCustomModels: vi.fn(async () => []),
   getModelAliases: vi.fn(async () => ({})),
   getDisabledModels: vi.fn(async () => ({})),
+  fetchGoRouterModels: vi.fn(),
 }));
 
 vi.mock("@/lib/localDb", () => ({
@@ -20,6 +21,10 @@ vi.mock("@/lib/disabledModelsDb", () => ({
 }));
 
 vi.mock("@/sse/services/tokenRefresh", () => ({ updateProviderCredentials: vi.fn() }));
+
+vi.mock("open-sse/services/gorouter.js", () => ({
+  fetchGoRouterModels: mocks.fetchGoRouterModels,
+}));
 
 vi.mock("@/lib/network/connectionProxy", () => ({
   resolveConnectionProxyConfig: vi.fn(async () => ({})),
@@ -90,5 +95,20 @@ describe("/v1/models — per-account policy visibility", () => {
   it("a level-only allowlist still lists the base model", async () => {
     mocks.getProviderConnections.mockResolvedValue([conn("A", [`${MODEL_A}(low)`, `${MODEL_A}(high)`])]);
     expect(await idsFor()).toEqual([qualified(MODEL_A)]);
+  });
+
+  it("unions each GoRouter account catalog after applying its allowlist", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "A", provider: "gorouter", isActive: true, accessToken: "ma", providerSpecificData: { userId: "1", enabledModels: ["model-a"] } },
+      { id: "B", provider: "gorouter", isActive: true, accessToken: "mb", providerSpecificData: { userId: "2", enabledModels: ["model-b"] } },
+    ]);
+    mocks.fetchGoRouterModels
+      .mockResolvedValueOnce({ ok: true, models: [{ id: "model-a" }, { id: "model-x" }] })
+      .mockResolvedValueOnce({ ok: true, models: [{ id: "model-b" }, { id: "model-y" }] });
+
+    const models = await buildModelsList(["llm"], { skipDynamicFetch: true });
+    const ids = models.filter((model) => model.owned_by === "gor").map((model) => model.id).sort();
+    expect(ids).toEqual(["gor/model-a", "gor/model-b"]);
+    expect(mocks.fetchGoRouterModels).toHaveBeenCalledTimes(2);
   });
 });

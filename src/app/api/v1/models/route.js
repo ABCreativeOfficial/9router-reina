@@ -14,11 +14,15 @@ import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
 import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
+import { fetchGoRouterModels } from "open-sse/services/gorouter.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
-import { collectProviderModelVisibility } from "@/sse/services/accountModelPolicy.js";
+import {
+  collectProviderModelVisibility,
+  isConnectionEligibleForModel,
+} from "@/sse/services/accountModelPolicy.js";
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -106,6 +110,21 @@ const LIVE_MODEL_RESOLVERS = {
       providerSpecificData: conn.providerSpecificData || {},
     }, { log: console });
     return result?.models?.length ? { models: result.models } : null;
+  },
+  gorouter: async (conn) => {
+    const proxy = await resolveConnectionProxyConfig(conn.providerSpecificData || {});
+    const result = await fetchGoRouterModels(
+      conn.accessToken,
+      conn.providerSpecificData?.userId,
+      {
+        connectionProxyEnabled: proxy.connectionProxyEnabled === true,
+        connectionProxyUrl: proxy.connectionProxyUrl || "",
+        connectionNoProxy: proxy.connectionNoProxy || "",
+        vercelRelayUrl: proxy.vercelRelayUrl || "",
+        strictProxy: proxy.strictProxy === true,
+      },
+    );
+    return result.ok && result.models.length ? { models: result.models } : null;
   },
   zed: async (conn) => {
     const result = await resolveZedModels({
@@ -394,20 +413,28 @@ export async function buildModelsList(kindFilter, options = {}) {
       // -thinking/-agentic variants per account). On failure, fall back to
       // whatever rawModelIds already holds.
       const liveResolver = LIVE_MODEL_RESOLVERS[providerId];
-      if (liveResolver && !hasExplicitEnabledModels) {
+      if (liveResolver) {
         try {
-          const live = await liveResolver(conn);
-          if (live?.models?.length) {
-            rawModelIds = live.models.map((m) => m.id);
-            liveModelKindById = new Map(
-              live.models
-                .filter((m) => m?.id)
-                .map((m) => [m.id, modelKind(m)])
-            );
+          const liveResults = providerId === "gorouter"
+            ? await Promise.all(
+                (activeConnectionsByProvider.get(providerId) || [conn]).map(async (candidate) => {
+                  const live = await liveResolver(candidate);
+                  return live?.models?.filter((model) =>
+                    model?.id && isConnectionEligibleForModel(candidate, model.id)
+                  ) || [];
+                })
+              )
+            : !hasExplicitEnabledModels
+              ? [(await liveResolver(conn))?.models || []]
+              : [];
+          const liveModels = Array.from(
+            new Map(liveResults.flat().filter((m) => m?.id).map((m) => [m.id, m])).values()
+          );
+          if (liveModels.length) {
+            rawModelIds = liveModels.map((m) => m.id);
+            liveModelKindById = new Map(liveModels.map((m) => [m.id, modelKind(m)]));
             liveCapabilitiesById = new Map(
-              live.models
-                .filter((m) => m?.id && m.capabilities)
-                .map((m) => [m.id, m.capabilities])
+              liveModels.filter((m) => m.capabilities).map((m) => [m.id, m.capabilities])
             );
           }
         } catch (err) {

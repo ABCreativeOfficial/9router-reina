@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, ModelAccessModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, GoRouterAuthModal, Toggle, Select, EditConnectionModal, ModelAccessModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -48,6 +48,7 @@ export default function ProviderDetailPage() {
   const [showOAuthModal, setShowOAuthModal] = useState(false);
   const [showIFlowCookieModal, setShowIFlowCookieModal] = useState(false);
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
+  const [showGoRouterAuthModal, setShowGoRouterAuthModal] = useState(false);
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
   const [showBulkImportGrokCli, setShowBulkImportGrokCli] = useState(false);
@@ -72,6 +73,7 @@ export default function ProviderDetailPage() {
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
+  const [liveModelsByConnection, setLiveModelsByConnection] = useState({});
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
@@ -113,6 +115,10 @@ export default function ProviderDetailPage() {
   };
 
   const triggerAddConnection = () => {
+    if (providerId === "gorouter") {
+      setShowGoRouterAuthModal(true);
+      return;
+    }
     if (isOAuth) {
       triggerOAuthConnection();
       return;
@@ -148,7 +154,7 @@ export default function ProviderDetailPage() {
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
   const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
   const staticModels = getModelsByProviderId(providerId);
-  const models = providerId === "cursor" && liveModels.length > 0
+  const models = (providerId === "cursor" || providerId === "gorouter") && liveModels.length > 0
     ? liveModels
     : staticModels;
   const providerAlias = getProviderAlias(providerId);
@@ -203,7 +209,19 @@ export default function ProviderDetailPage() {
   const modelCatalog = buildProviderModelCatalog({
     staticModels,
     liveModels,
-    preferLiveModels: providerId === "cursor",
+    preferLiveModels: providerId === "cursor" || providerId === "gorouter",
+    kiloFreeModels,
+    customModels,
+    modelAliases,
+    providerStorageAlias,
+    disabledModelIds,
+  });
+  const modelAccessCatalog = buildProviderModelCatalog({
+    staticModels,
+    liveModels: providerId === "gorouter" && selectedConnection?.id
+      ? liveModelsByConnection[selectedConnection.id] || []
+      : liveModels,
+    preferLiveModels: providerId === "cursor" || providerId === "gorouter",
     kiloFreeModels,
     customModels,
     modelAliases,
@@ -475,30 +493,38 @@ export default function ProviderDetailPage() {
     fetchDisabledModels();
   }, [fetchConnections, fetchAliases, fetchCustomModels, fetchDisabledModels]);
 
-  // Cursor's model availability is account-specific and changes frequently.
-  // Load the active account's live catalog for the dashboard; the static
-  // registry remains the fallback while the request is pending or unavailable.
+  // Cursor and GoRouter expose account-specific live catalogs. GoRouter's
+  // dashboard list is the union across active accounts; per-account restrictions
+  // still enforce routing eligibility in accountModelPolicy.
   useEffect(() => {
-    if (providerId !== "cursor") {
-      setLiveModels([]);
-      return;
-    }
+    if (providerId !== "cursor" && providerId !== "gorouter") return;
 
-    const connection = connections.find((item) => item.isActive !== false);
-    if (!connection?.id) {
-      setLiveModels([]);
-      return;
-    }
+    const activeConnections = connections.filter((item) => item.isActive !== false);
+    const targets = providerId === "gorouter" ? activeConnections : activeConnections.slice(0, 1);
+    if (!targets.length) return;
 
     let cancelled = false;
-    fetch(`/api/providers/${connection.id}/models`, { cache: "no-store" })
-      .then(async (res) => ({ ok: res.ok, data: await res.json() }))
-      .then(({ ok, data }) => {
-        if (!cancelled && ok && Array.isArray(data.models) && data.models.length > 0) {
-          setLiveModels(data.models);
-        }
-      })
-      .catch(() => {});
+    Promise.all(targets.map((connection) =>
+      fetch(`/api/providers/${connection.id}/models`, { cache: "no-store" })
+        .then(async (res) => ({ ok: res.ok, data: await res.json() }))
+        .catch(() => ({ ok: false, data: {} }))
+    )).then((results) => {
+      if (cancelled) return;
+      const byConnection = Object.fromEntries(targets.map((connection, index) => [
+        connection.id,
+        results[index]?.ok && Array.isArray(results[index]?.data?.models)
+          ? results[index].data.models
+          : [],
+      ]));
+      const models = Array.from(new Map(
+        Object.values(byConnection)
+          .flat()
+          .filter((model) => model?.id)
+          .map((model) => [model.id, model])
+      ).values());
+      setLiveModelsByConnection(byConnection);
+      setLiveModels(models);
+    });
 
     return () => { cancelled = true; };
   }, [providerId, connections]);
@@ -1644,6 +1670,17 @@ export default function ProviderDetailPage() {
                       {translate("Bulk Add")}
                     </Button>
                   )}
+                  {providerId === "gorouter" && (
+                    <Button
+                      size="sm"
+                      icon="login"
+                      variant="secondary"
+                      onClick={() => setShowGoRouterAuthModal(true)}
+                      className="w-full sm:w-auto"
+                    >
+                      Connect GoRouter
+                    </Button>
+                  )}
                   {hasDualAuthModes ? (
                     <>
                       <Button
@@ -1664,7 +1701,7 @@ export default function ProviderDetailPage() {
                         {apiKeyConnectionLabel}
                       </Button>
                     </>
-                  ) : (
+                  ) : providerId !== "gorouter" && (
                     <Button
                       size="sm"
                       icon="add"
@@ -1765,6 +1802,14 @@ export default function ProviderDetailPage() {
           onClose={() => setShowIFlowCookieModal(false)}
         />
       )}
+      <GoRouterAuthModal
+        isOpen={showGoRouterAuthModal}
+        onSuccess={() => {
+          setShowGoRouterAuthModal(false);
+          fetchConnections();
+        }}
+        onClose={() => setShowGoRouterAuthModal(false)}
+      />
       <AddApiKeyModal
         isOpen={showAddApiKeyModal}
         provider={providerId}
@@ -1794,7 +1839,7 @@ export default function ProviderDetailPage() {
       <ModelAccessModal
         isOpen={showModelAccessModal}
         connection={selectedConnection}
-        entries={modelCatalog.entries}
+        entries={modelAccessCatalog.entries}
         onSave={handleUpdateModelAccess}
         onClose={() => setShowModelAccessModal(false)}
       />
