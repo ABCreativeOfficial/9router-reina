@@ -13,6 +13,7 @@ import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
+import { fetchGoRouterModels } from "open-sse/services/gorouter.js";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
@@ -468,6 +469,24 @@ const PROVIDER_MODELS_CONFIG = {
       parseFn: parseGeminiCliModels,
       errorLabel: "Failed to fetch Gemini CLI models"
     })
+  },
+  gorouter: {
+    customResolver: async (connection) => {
+      const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+      const result = await fetchGoRouterModels(
+        connection.accessToken,
+        connection.providerSpecificData?.userId,
+        {
+          connectionProxyEnabled: proxy.connectionProxyEnabled === true,
+          connectionProxyUrl: proxy.connectionProxyUrl || "",
+          connectionNoProxy: proxy.connectionNoProxy || "",
+          vercelRelayUrl: proxy.vercelRelayUrl || "",
+          strictProxy: proxy.strictProxy === true,
+        },
+      );
+      if (!result.ok) return { error: result.message, status: result.status };
+      return { models: result.models };
+    },
   },
   "grok-cli": {
     customResolver: async (connection) => {
