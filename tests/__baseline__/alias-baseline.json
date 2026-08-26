@@ -193,6 +193,8 @@
     "glm-cn": "glm-cn",
     "google-pse": "gpse",
     "google-tts": "google-tts",
+    "gorouter": "gor",
+
     "grok-cli": "gcli",
     "grok-web": "grok-web",
     "groq": "groq",
@@ -329,6 +331,7 @@
     "glm",
     "glm-cn",
     "google-tts",
+    "gor",
     "grok-web",
     "groq",
     "huggingface",
