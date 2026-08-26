@@ -23,6 +23,7 @@ import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
+import ProviderConnectionTransfer from "./ProviderConnectionTransfer";
 
 const ONE_BY_ONE_DELAY_MS = 1000;
 
@@ -1457,6 +1458,11 @@ export default function ProviderDetailPage() {
                   Apply Proxy
                 </Button>
               )}
+              <ProviderConnectionTransfer
+                providerId={providerId}
+                selectedConnectionIds={selectedConnectionIds}
+                onImported={fetchConnections}
+              />
               {connections.length > 0 && (
                 <>
                   {selectedConnectionIds.length > 0 && (

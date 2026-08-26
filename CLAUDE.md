@@ -90,6 +90,98 @@ Pre-translate hooks that compress `tool_result` content in-place to cut tokens. 
 - Binary/protobuf upstreams (kiro EventStream, cursor protobuf, commandcode NDJSON) don't round-trip through OpenAI — they're handled inside their own executor, not the translator.
 - Versioning: root and `cli/` are versioned independently; changes are logged in `CHANGELOG.md`. Commit style is Conventional Commits (`fix(translator): …`, `feat(...)`).
 
+## Custom Fork / Reina Development Notes
+
+Everything below is settled convention for this fork. Treat it as agreed — don't re-derive it, re-audit the remotes, or re-explain it back to the user.
+
+### Git layout
+
+This is a custom fork of `https://github.com/decolua/9router.git`.
+
+| | |
+|---|---|
+| `upstream` | official `decolua/9router` (fetch only) |
+| `upstream/master` | official branch |
+| `master` | clean official baseline — **never** put custom work here |
+| `origin` | the user's own fork |
+| `custom` | development/production branch for all custom work |
+
+`git rerere` is enabled to replay repeated conflict resolutions across rebases.
+
+Pulling upstream in:
+```bash
+git fetch upstream
+git checkout master
+git merge --ff-only upstream/master
+
+git checkout custom
+git rebase master
+```
+Then verify statically (see below) and, if the rebase rewrote history, `git push --force-with-lease origin custom`.
+
+Never `reset --hard`, delete a branch, or `push --force` without first proving the worktree is safe. Use `--force-with-lease`, never bare `--force`.
+
+### Custom feature: Per-Account Model Access
+
+Lets each provider connection declare which models it may serve, so a request only enters the account pool of connections allowed to serve that model.
+
+**Canonical persistence** — `connection.providerSpecificData.enabledModels`, a string array. There is deliberately no second field:
+- missing → unrestricted (legacy behavior)
+- empty → unrestricted (legacy behavior)
+- non-empty → the account is eligible **only** for those models
+
+Semantics:
+- Per **model**, not per thinking level. An entry grants its model at every level, because `m(level)` is a request-time suffix on the model `m`. A stored `m(level)` is normalized to `m` on read and write.
+- No Free/Plus/Pro mapping anywhere. The user's per-account selection is the only authority.
+- Provider-agnostic — nothing is specific to ChatGPT/Codex.
+
+**Routing enforcement** — `src/sse/services/auth.js`, inside `getProviderCredentials()`, filters the connection list *before* lock/exclude filtering and before any selection strategy. An ineligible account therefore never reaches round-robin, fill-first, priority, sticky/pin, or retry/fallback selection. Zero eligible accounts returns `null` (the pre-existing "no credentials" contract), which `src/sse/handlers/chat.js` refines into a `no_eligible_account_for_model` message for a direct model request.
+
+Where the code lives:
+- `src/sse/services/accountModelPolicy.js` — all policy logic (sanitize, eligibility, `/v1/models` union, no-eligible-account reason). Keep new policy logic here.
+- `src/shared/components/ModelAccessModal.js` — the UI, a standalone modal opened from a **Models** action beside Edit on each connection row (`src/app/(dashboard)/dashboard/providers/[id]/ConnectionRow.js`). It is deliberately **not** part of Edit Connection.
+- `src/shared/utils/providerModelCatalog.js` — one catalog builder shared by the provider page's Available Models grid and the modal, so the two lists cannot drift.
+
+Two things to keep straight:
+- The official **global disabled-model** feature (`src/lib/disabledModelsDb.js`, `/api/models/disabled`) is a separate concept. Don't merge them or repurpose one as the other. The modal shows globally-disabled models labelled rather than hidden.
+- `/v1/models` exposes the **union** across a provider's active accounts: a model stays listed while at least one account can serve it, and any unrestricted account keeps the full catalog visible. Never let one account's restriction hide a model globally.
+
+### Keep the upstream conflict surface minimal
+
+The point of this fork's structure is that a future `git rebase master` mostly applies cleanly.
+
+Prefer: a new module/helper; a small integration hook in an existing function; reuse of the existing repo/db/provider abstractions.
+
+Avoid: rewriting official routing; large refactors; a duplicate subsystem alongside an official one; hardcoded provider/model/plan tables; edits under `open-sse/` unless genuinely required (and read `open-sse/AGENTS.md` first if so).
+
+### Verification policy — static only by default
+
+For normal development tasks, verify **statically**. Do not start a server to check your work. Do not run `npm run dev`, `npm start`, `next dev`, any HTTP server, or a browser/manual smoke test unless the user explicitly asks for a runtime or integration test.
+
+Default verification:
+1. targeted unit tests for the area you changed
+2. any other relevant Vitest tests
+3. `npm run build`
+4. ESLint on the changed files, where relevant
+5. static inspection / code-path reading
+
+For the model-access feature that means:
+```bash
+cd tests && npx vitest run unit/account-model-policy unit/provider-model-catalog
+npm run build          # from repo root
+```
+plus lint scoped to the files you touched.
+
+### Do not baseline-compare against clean master
+
+Do **not** stash your changes, run the suite on a clean `master`/upstream baseline, restore, and diff the pass/fail counts. That workflow is only for an explicit request for upstream regression comparison.
+
+The upstream suite has known failures (see the Tests section above). When one shows up, just report the targeted test result, the build result, and the lint result. If you ran a broader suite and something unrelated failed, say so in a sentence and move on — don't launch a baseline comparison to prove it was already red.
+
+### Startup behavior
+
+Run `git status` before making changes and read the code relevant to the task. Skip the full repository audit, and skip re-explaining the remote layout, the branch split, the fork relationship, the verification policy, or whether to baseline-compare — all of that is settled above.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
