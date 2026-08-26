@@ -37,7 +37,14 @@ const PUBLIC_API_PATHS = [
 // Keep root-level rewrites here too: middleware runs before Next.js rewrites.
 const PUBLIC_PREFIXES = ["/v1", "/v1beta", "/api/v1", "/api/v1beta", "/codex", "/responses"];
 
-// Always require JWT token regardless of requireLogin setting
+// Secret-bearing transfer routes: remote access always requires JWT/CLI auth.
+// Local no-login mode stays usable, subject to the trusted loopback + Origin check.
+const SENSITIVE_DASHBOARD_PATHS = [
+  "/api/providers/export",
+  "/api/providers/import",
+];
+
+// Always require JWT or local CLI token, even when dashboard login is disabled.
 const ALWAYS_PROTECTED = [
   "/api/shutdown",
   "/api/settings/database",
@@ -81,6 +88,7 @@ const LOCAL_ONLY_PATHS = [
   "/api/tunnel/disable",
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
+  "/api/providers/gorouter/bootstrap",
   "/api/auth/reset-password",
   "/api/headroom/start",
   "/api/headroom/stop",
@@ -207,6 +215,17 @@ export async function proxy(request) {
     if (!(await canAccessLocalOnlyRoute(request))) {
       return NextResponse.json({ error: "Local only: CLI token required" }, { status: 403 });
     }
+  }
+
+  // Credential import/export: permit local browser use in no-login mode, but
+  // never let a remote request bypass auth merely because requireLogin=false.
+  if (SENSITIVE_DASHBOARD_PATHS.some((p) => pathname.startsWith(p))) {
+    if (
+      await hasValidCliToken(request) ||
+      await hasValidToken(request) ||
+      (isLocalRequest(request) && await isAuthenticated(request))
+    ) return NextResponse.next();
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   // Always protected - require valid JWT or local CLI token (machineId-based)
