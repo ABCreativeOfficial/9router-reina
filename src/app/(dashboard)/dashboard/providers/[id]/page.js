@@ -49,6 +49,7 @@ export default function ProviderDetailPage() {
   const [showIFlowCookieModal, setShowIFlowCookieModal] = useState(false);
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
   const [showGoRouterAuthModal, setShowGoRouterAuthModal] = useState(false);
+  const [goRouterReconnectUserId, setGoRouterReconnectUserId] = useState(null);
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
   const [showBulkImportGrokCli, setShowBulkImportGrokCli] = useState(false);
@@ -116,6 +117,7 @@ export default function ProviderDetailPage() {
 
   const triggerAddConnection = () => {
     if (providerId === "gorouter") {
+      setGoRouterReconnectUserId(null);
       setShowGoRouterAuthModal(true);
       return;
     }
@@ -1053,6 +1055,10 @@ export default function ProviderDetailPage() {
                   setSelectedConnection(conn);
                   setShowModelAccessModal(true);
                 }}
+                onReconnect={providerId === "gorouter" && conn.providerSpecificData?.userId ? () => {
+                  setGoRouterReconnectUserId(String(conn.providerSpecificData.userId));
+                  setShowGoRouterAuthModal(true);
+                } : undefined}
                 onDelete={() => handleDelete(conn.id)}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
@@ -1675,7 +1681,10 @@ export default function ProviderDetailPage() {
                       size="sm"
                       icon="login"
                       variant="secondary"
-                      onClick={() => setShowGoRouterAuthModal(true)}
+                      onClick={() => {
+                        setGoRouterReconnectUserId(null);
+                        setShowGoRouterAuthModal(true);
+                      }}
                       className="w-full sm:w-auto"
                     >
                       Connect GoRouter
@@ -1804,11 +1813,16 @@ export default function ProviderDetailPage() {
       )}
       <GoRouterAuthModal
         isOpen={showGoRouterAuthModal}
+        expectedUserId={goRouterReconnectUserId}
         onSuccess={() => {
           setShowGoRouterAuthModal(false);
+          setGoRouterReconnectUserId(null);
           fetchConnections();
         }}
-        onClose={() => setShowGoRouterAuthModal(false)}
+        onClose={() => {
+          setShowGoRouterAuthModal(false);
+          setGoRouterReconnectUserId(null);
+        }}
       />
       <AddApiKeyModal
         isOpen={showAddApiKeyModal}

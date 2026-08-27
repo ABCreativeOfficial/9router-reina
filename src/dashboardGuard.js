@@ -31,6 +31,11 @@ const PUBLIC_API_PATHS = [
   "/api/auth/saml",
   "/api/version",
   "/api/settings/require-login",
+  // GoRouter Chrome-bridge completion. The extension posts from the gorouter.app
+  // page context and has no dashboard cookie, so the gate cannot be a session
+  // check. Authorization is the one-time 256-bit pairing secret in the body,
+  // which the route verifies against a stored hash (single-use, 5-min TTL).
+  "/api/providers/gorouter/pair/complete",
 ];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
@@ -89,6 +94,8 @@ const LOCAL_ONLY_PATHS = [
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
   "/api/providers/gorouter/bootstrap",
+  "/api/providers/gorouter/pair/start",
+  "/api/providers/gorouter/pair/status",
   "/api/auth/reset-password",
   "/api/headroom/start",
   "/api/headroom/stop",
