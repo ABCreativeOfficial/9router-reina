@@ -26,8 +26,12 @@ export function cleanConnectionName(value, fallback) {
   return name && name.length <= MAX_NAME_LENGTH ? name : fallback;
 }
 
-export function buildGoRouterConnectionName({ requested, token, account, existingNames = [] }) {
-  const fallback = token?.name || account?.displayName || `GoRouter ${account?.id}`;
+/**
+ * Initial name for a NEW connection: the account's own identity, never the
+ * selected inference token's name (a token is a credential, not an account).
+ */
+export function buildGoRouterConnectionName({ requested, account, existingNames = [] }) {
+  const fallback = account?.displayName || account?.username || `GoRouter ${account?.id}`;
   const base = cleanConnectionName(requested, fallback);
   const taken = new Set(existingNames.filter(Boolean));
   if (!taken.has(base)) return base;
@@ -134,6 +138,8 @@ export async function connectGoRouterAccount({
   const existing = await findGoRouterConnectionByUserId(account.id);
 
   if (existing) {
+    // Reconnect re-authenticates in place and never renames: the stored name may
+    // have been customized by the user, and the account identity has not changed.
     const updated = await updateProviderConnection(existing.id, {
       apiKey: keyResult.apiKey,
       accessToken: String(managementToken).trim(),
@@ -143,7 +149,6 @@ export async function connectGoRouterAccount({
       testStatus: "active",
       lastError: null,
       lastErrorAt: null,
-      ...(typeof name === "string" && name.trim() ? { name: cleanConnectionName(name, existing.name) } : {}),
     });
     return {
       ok: true,
@@ -160,7 +165,6 @@ export async function connectGoRouterAccount({
     authType: "apikey",
     name: buildGoRouterConnectionName({
       requested: name,
-      token: selection.token,
       account,
       existingNames: connections.map((entry) => entry.name),
     }),
