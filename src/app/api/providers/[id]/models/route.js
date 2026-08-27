@@ -19,7 +19,28 @@ import { resolveCommandCodeModels } from "open-sse/services/commandcodeModels.js
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import codexProvider from "open-sse/providers/registry/codex.js";
-import { fetchGoRouterModels } from "open-sse/services/gorouter.js";
+import { gorouterClient } from "open-sse/services/gorouter.js";
+import { tabitokenClient } from "open-sse/services/tabitoken.js";
+
+// New API deployments (GoRouter, TabiToken) expose an account-specific catalog
+// behind their management credential, so the resolver is shared and the registry
+// entry only names the client.
+async function resolveNewApiModels(client, connection) {
+  const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+  const result = await client.fetchModels(
+    connection.accessToken,
+    connection.providerSpecificData?.userId,
+    {
+      connectionProxyEnabled: proxy.connectionProxyEnabled === true,
+      connectionProxyUrl: proxy.connectionProxyUrl || "",
+      connectionNoProxy: proxy.connectionNoProxy || "",
+      vercelRelayUrl: proxy.vercelRelayUrl || "",
+      strictProxy: proxy.strictProxy === true,
+    },
+  );
+  if (!result.ok) return { error: result.message, status: result.status };
+  return { models: result.models };
+}
 
 /**
  * Fill in what the provider omitted, in the field names the pickers already read.
@@ -562,24 +583,8 @@ const PROVIDER_MODELS_CONFIG = {
       errorLabel: "Failed to fetch Gemini CLI models"
     })
   },
-  gorouter: {
-    customResolver: async (connection) => {
-      const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
-      const result = await fetchGoRouterModels(
-        connection.accessToken,
-        connection.providerSpecificData?.userId,
-        {
-          connectionProxyEnabled: proxy.connectionProxyEnabled === true,
-          connectionProxyUrl: proxy.connectionProxyUrl || "",
-          connectionNoProxy: proxy.connectionNoProxy || "",
-          vercelRelayUrl: proxy.vercelRelayUrl || "",
-          strictProxy: proxy.strictProxy === true,
-        },
-      );
-      if (!result.ok) return { error: result.message, status: result.status };
-      return { models: result.models };
-    },
-  },
+  gorouter: { customResolver: (connection) => resolveNewApiModels(gorouterClient, connection) },
+  tabitoken: { customResolver: (connection) => resolveNewApiModels(tabitokenClient, connection) },
   "grok-cli": {
     customResolver: async (connection) => {
       const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
