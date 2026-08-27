@@ -43,6 +43,10 @@ import { ConfirmModal, EditConnectionModal } from "@/shared/components";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { isNewApiConnection } from "open-sse/services/newapi/definition.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import {
+  getProviderDisplayInitials,
+  getProviderDisplayName,
+} from "@/shared/utils/newApiDisplay";
 
 // Maps the stored providerSpecificData.authMethod to a human label for Kiro.
 // Values come from the Kiro connect flows: builder-id/idc (device code),
@@ -199,7 +203,7 @@ export default function ProviderLimits() {
         const nextTotals = getSafeTotals(data.totals, connectionList.length);
 
         setConnections(connectionList);
-        setProviderOptions(getProviderOptions(data.providerOptions));
+        setProviderOptions(getProviderOptions(data.providerOptions, data.providerDisplay));
         setPagination(nextPagination);
         setTotals(nextTotals);
         setPage(getPaginationPageValue(data.pagination, targetPage));
@@ -748,8 +752,12 @@ export default function ProviderLimits() {
     bulkSetActive(ids, true);
   };
 
-  const selectedProviderLabel =
-    providerFilter === "all" ? "All providers" : providerFilter;
+  const selectedProvider = providerOptions.find((option) => option.id === providerFilter);
+  const selectedProviderLabel = providerFilter === "all"
+    ? "All providers"
+    : selectedProvider?.label || providerFilter;
+  const selectedProviderInitials = selectedProvider?.initials
+    || providerFilter.slice(0, 2).toUpperCase();
   const hasEligibleConnections = totals.eligibleConnections > 0;
   const hasVisibleConnections = sortedConnections.length > 0;
   const emptyState = getConnectionsEmptyMessage(
@@ -819,11 +827,11 @@ export default function ProviderLimits() {
                   </span>
                 ) : (
                   <ProviderIcon
-                    src={`/providers/${providerFilter}.png`}
-                    alt={providerFilter}
+                    src={selectedProvider?.isNewApi ? undefined : `/providers/${providerFilter}.png`}
+                    alt={selectedProviderLabel}
                     size={18}
                     className="size-[18px] rounded object-contain"
-                    fallbackText={providerFilter.slice(0, 2).toUpperCase()}
+                    fallbackText={selectedProviderInitials}
                   />
                 )}
                 <span className="truncate capitalize hidden lg:inline">
@@ -869,28 +877,28 @@ export default function ProviderLimits() {
                   <div className="max-h-72 overflow-y-auto pr-1">
                     {providerOptions.map((provider) => (
                       <button
-                        key={provider}
+                        key={provider.id}
                         type="button"
                         onClick={() => {
-                          if (shouldResetPage(providerFilter, provider)) {
+                          if (shouldResetPage(providerFilter, provider.id)) {
                             setPage(1);
                           }
-                          setProviderFilter(provider);
+                          setProviderFilter(provider.id);
                           setProviderMenuOpen(false);
                         }}
-                        className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${providerFilter === provider ? "bg-primary/10 text-primary" : "text-text-primary hover:bg-black/5 dark:hover:bg-white/10"}`}
+                        className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${providerFilter === provider.id ? "bg-primary/10 text-primary" : "text-text-primary hover:bg-black/5 dark:hover:bg-white/10"}`}
                       >
                         <ProviderIcon
-                          src={`/providers/${provider}.png`}
-                          alt={provider}
+                          src={provider.isNewApi ? undefined : `/providers/${provider.id}.png`}
+                          alt={provider.label}
                           size={24}
                           className="size-6 rounded-md object-contain"
-                          fallbackText={provider.slice(0, 2).toUpperCase()}
+                          fallbackText={provider.initials}
                         />
                         <span className="font-medium capitalize">
-                          {provider}
+                          {provider.label}
                         </span>
-                        {providerFilter === provider && (
+                        {providerFilter === provider.id && (
                           <span className="material-symbols-outlined ml-auto text-[20px]">
                             check
                           </span>
@@ -1032,6 +1040,8 @@ export default function ProviderLimits() {
 
           // Use table layout for all providers
           const isInactive = conn.isActive === false;
+          const providerDisplayName = getProviderDisplayName(conn);
+          const providerDisplayInitials = getProviderDisplayInitials(conn);
           const isCodex = conn.provider === "codex";
           const resetCreditCount = getCodexResetCreditCount(quota);
           const isResettingLimit = resettingLimitId === conn.id;
@@ -1051,18 +1061,16 @@ export default function ProviderLimits() {
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center overflow-hidden">
                       <ProviderIcon
-                        src={`/providers/${conn.provider}.png`}
-                        alt={conn.provider}
+                        src={isNewApiConnection(conn) ? undefined : `/providers/${conn.provider}.png`}
+                        alt={providerDisplayName}
                         size={32}
                         className="object-contain"
-                        fallbackText={
-                          conn.provider?.slice(0, 2).toUpperCase() || "PR"
-                        }
+                        fallbackText={providerDisplayInitials}
                       />
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-sm font-semibold text-text-primary capitalize truncate">
-                        {conn.provider}
+                        {providerDisplayName}
                       </h3>
                       {getConnectionLabel(conn) ? (
                         <p className="text-xs text-text-muted truncate">

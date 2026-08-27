@@ -186,8 +186,13 @@ export function getPaginationPageValue(dataPagination, fallbackPage) {
   return dataPagination?.page || fallbackPage;
 }
 
-export function getProviderOptions(dataProviderOptions) {
-  return dataProviderOptions || [];
+export function getProviderOptions(dataProviderOptions, providerDisplay = {}) {
+  return (dataProviderOptions || []).map((id) => ({
+    id,
+    label: providerDisplay[id]?.label || id,
+    initials: providerDisplay[id]?.initials || id.slice(0, 2).toUpperCase(),
+    isNewApi: providerDisplay[id]?.isNewApi === true,
+  }));
 }
 
 export async function reconcileConnectionsPage(fetchConnections, targetPage) {

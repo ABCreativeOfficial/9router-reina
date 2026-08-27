@@ -28,6 +28,7 @@ import AddCompatibleModal from "./components/AddCompatibleModal";
 import { STATUS_FILTER_OPTIONS, matchesStatusFilter } from "./utils";
 import AddNewApiProviderModal from "./components/AddNewApiProviderModal";
 import { NEW_API_FAMILY, NEW_API_NODE_TYPE } from "open-sse/services/newapi/definition.js";
+import { getNewApiInitials } from "@/shared/utils/newApiDisplay";
 
 function getStatusDisplay(connected, error, errorCode) {
   const parts = [];
@@ -290,7 +291,7 @@ export default function ProvidersPage() {
       id: node.id,
       name: node.name || "New API",
       color: "#7C3AED",
-      textIcon: "NA",
+      textIcon: getNewApiInitials(node.prefix, node.name),
       family: NEW_API_FAMILY,
       origin: node.newApi?.origin || "",
     }))

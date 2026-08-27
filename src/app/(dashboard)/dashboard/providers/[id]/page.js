@@ -8,6 +8,7 @@ import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/prov
 import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, NewApiAuthModal, Toggle, Select, EditConnectionModal, ModelAccessModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { NEW_API_FAMILY } from "open-sse/services/newapi/definition.js";
+import { getNewApiInitials } from "@/shared/utils/newApiDisplay";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -152,7 +153,7 @@ export default function ProviderDetailPage() {
           ? "#7C3AED"
           : providerNode.type === "anthropic-compatible" ? "#D97757" : "#10A37F",
         textIcon: providerNode.family === NEW_API_FAMILY
-          ? "NA"
+          ? getNewApiInitials(providerNode.prefix, providerNode.name)
           : providerNode.type === "anthropic-compatible" ? "AC" : "OC",
         apiType: providerNode.apiType,
         baseUrl: providerNode.baseUrl,
