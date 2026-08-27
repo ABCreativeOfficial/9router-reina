@@ -146,6 +146,7 @@ import p146 from "./chatgpt-web.js";
 import p147 from "./veoaifree-web.js";
 import p151 from "./uc-web.js";
 import p124g from "./gorouter.js";
+import p125t from "./tabitoken.js";
 
 export default [
   p0,
@@ -293,5 +294,6 @@ export default [
   p147,
   p151,
   p124g,
+  p125t,
 
 ];

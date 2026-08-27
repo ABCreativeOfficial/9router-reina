@@ -248,10 +248,11 @@ describe("dashboard guard local-only access", () => {
     expect(local).toBe(mocks.nextResponse);
   });
 
-  it("keeps GoRouter pairing start and status local-only", async () => {
+  it("keeps New API onboarding routes local-only", async () => {
     for (const pathname of [
       "/api/providers/gorouter/pair/start",
       "/api/providers/gorouter/pair/status",
+      "/api/providers/tabitoken/bootstrap",
     ]) {
       const remote = await proxy(request(pathname, { host: "router.example.com" }));
       expect(remote.status).toBe(403);
