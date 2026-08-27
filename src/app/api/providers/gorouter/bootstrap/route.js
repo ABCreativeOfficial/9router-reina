@@ -1,100 +1,72 @@
 import { NextResponse } from "next/server";
-import { createProviderConnection } from "@/models";
 import {
-  fetchGoRouterModels,
-  listGoRouterTokens,
-  retrieveGoRouterTokenKey,
-  validateGoRouterInferenceKey,
-  validateGoRouterManagementCredentials,
-} from "open-sse/services/gorouter.js";
+  connectGoRouterAccount,
+  inspectGoRouterAccount,
+  safeConnectionSummary,
+} from "@/sse/services/gorouterBootstrap";
 
 export const dynamic = "force-dynamic";
 
-function cleanName(value, fallback) {
-  if (typeof value !== "string") return fallback;
-  const name = value.trim();
-  return name && name.length <= 200 ? name : fallback;
-}
+const NO_STORE = { "Cache-Control": "no-store" };
 
 function safeError(result, fallback, status = 400) {
   return NextResponse.json(
-    { error: result?.message || fallback },
-    { status: result?.status >= 400 && result.status < 600 ? result.status : status },
+    { error: result?.message || fallback, ...(result?.state ? { state: result.state } : {}) },
+    {
+      status: result?.status >= 400 && result.status < 600 ? result.status : status,
+      headers: NO_STORE,
+    },
   );
 }
 
+/**
+ * POST /api/providers/gorouter/bootstrap
+ *
+ * Advanced/manual GoRouter onboarding: the user supplies management credentials
+ * directly. The Chrome-bridge pairing routes converge on the same service, so
+ * every validation gate lives in one place. Local-only via dashboardGuard.
+ */
 export async function POST(request) {
   try {
     const body = await request.json();
     const managementToken = body?.managementToken;
     const userId = body?.userId;
-    const validation = await validateGoRouterManagementCredentials(managementToken, userId);
-    if (!validation.ok) {
-      return safeError(validation, "GoRouter management authentication failed.", 401);
-    }
 
-    const listed = await listGoRouterTokens(managementToken, userId);
-    if (!listed.ok) {
-      return safeError(listed, "Unable to retrieve GoRouter API tokens.", 502);
+    const inspection = await inspectGoRouterAccount({ managementToken, userId });
+    if (!inspection.ok) {
+      return safeError(inspection, "GoRouter management authentication failed.", 401);
     }
 
     if (body?.action !== "connect") {
-      return NextResponse.json({
-        account: validation.account,
-        tokens: listed.tokens,
-      });
-    }
-
-    const tokenId = Number(body?.tokenId);
-    const selected = listed.tokens.find((token) => token.id === tokenId);
-    if (!selected || selected.status !== 1) {
       return NextResponse.json(
-        { error: "Selected GoRouter token is unavailable." },
-        { status: 400 },
+        { account: inspection.account, tokens: inspection.tokens, state: inspection.state },
+        { headers: NO_STORE },
       );
     }
 
-    const [keyResult, modelsResult] = await Promise.all([
-      retrieveGoRouterTokenKey(managementToken, userId, tokenId),
-      fetchGoRouterModels(managementToken, userId),
-    ]);
-    if (!keyResult.ok) {
-      return safeError(keyResult, "Selected GoRouter token is unavailable.", 502);
-    }
-    if (!modelsResult.ok) {
-      return safeError(modelsResult, "GoRouter model list could not be fetched.", 502);
-    }
-    const inferenceValidation = await validateGoRouterInferenceKey(keyResult.apiKey);
-    if (!inferenceValidation.ok) {
-      return safeError(inferenceValidation, "Selected GoRouter token is unavailable.", 502);
-    }
-
-    const fallbackName = selected.name || validation.account.displayName || `GoRouter ${validation.account.id}`;
-    const connection = await createProviderConnection({
-      provider: "gorouter",
-      authType: "apikey",
-      name: cleanName(body?.name, fallbackName),
-      apiKey: keyResult.apiKey,
-      accessToken: String(managementToken).trim(),
-      providerSpecificData: {
-        userId: validation.account.id,
-      },
-      isActive: true,
-      testStatus: "active",
+    const result = await connectGoRouterAccount({
+      managementToken,
+      userId,
+      tokenId: body?.tokenId,
+      name: body?.name,
+      inspection,
     });
+    if (!result.ok) {
+      return safeError(result, "Selected GoRouter token is unavailable.", 400);
+    }
 
-    return NextResponse.json({
-      success: true,
-      connection: {
-        id: connection.id,
-        provider: connection.provider,
-        name: connection.name,
-        authType: connection.authType,
-        providerSpecificData: { userId: validation.account.id },
+    return NextResponse.json(
+      {
+        success: true,
+        connection: safeConnectionSummary(result.connection, result.account),
+        models: result.models,
       },
-      models: modelsResult.models,
-    }, { status: 201 });
+      { status: result.created ? 201 : 200, headers: NO_STORE },
+    );
   } catch {
-    return NextResponse.json({ error: "Unable to connect GoRouter account." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Unable to connect GoRouter account." },
+      { status: 500, headers: NO_STORE },
+    );
   }
 }
