@@ -14,7 +14,8 @@ import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
 import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
-import { fetchGoRouterModels } from "open-sse/services/gorouter.js";
+import { gorouterClient } from "open-sse/services/gorouter.js";
+import { tabitokenClient } from "open-sse/services/tabitoken.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
@@ -23,6 +24,28 @@ import {
   collectProviderModelVisibility,
   isConnectionEligibleForModel,
 } from "@/sse/services/accountModelPolicy.js";
+
+// New API deployments serve an account-specific catalog behind the management
+// credential, so both share one resolver and the map only names the client.
+async function resolveNewApiLiveModels(client, conn) {
+  const proxy = await resolveConnectionProxyConfig(conn.providerSpecificData || {});
+  const result = await client.fetchModels(
+    conn.accessToken,
+    conn.providerSpecificData?.userId,
+    {
+      connectionProxyEnabled: proxy.connectionProxyEnabled === true,
+      connectionProxyUrl: proxy.connectionProxyUrl || "",
+      connectionNoProxy: proxy.connectionNoProxy || "",
+      vercelRelayUrl: proxy.vercelRelayUrl || "",
+      strictProxy: proxy.strictProxy === true,
+    },
+  );
+  return result.ok && result.models.length ? { models: result.models } : null;
+}
+
+// Providers whose live catalog is per-account: the union is built across every
+// active connection, each filtered by its own enabledModels policy.
+const PER_ACCOUNT_LIVE_PROVIDERS = new Set(["gorouter", "tabitoken"]);
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -111,21 +134,8 @@ const LIVE_MODEL_RESOLVERS = {
     }, { log: console });
     return result?.models?.length ? { models: result.models } : null;
   },
-  gorouter: async (conn) => {
-    const proxy = await resolveConnectionProxyConfig(conn.providerSpecificData || {});
-    const result = await fetchGoRouterModels(
-      conn.accessToken,
-      conn.providerSpecificData?.userId,
-      {
-        connectionProxyEnabled: proxy.connectionProxyEnabled === true,
-        connectionProxyUrl: proxy.connectionProxyUrl || "",
-        connectionNoProxy: proxy.connectionNoProxy || "",
-        vercelRelayUrl: proxy.vercelRelayUrl || "",
-        strictProxy: proxy.strictProxy === true,
-      },
-    );
-    return result.ok && result.models.length ? { models: result.models } : null;
-  },
+  gorouter: (conn) => resolveNewApiLiveModels(gorouterClient, conn),
+  tabitoken: (conn) => resolveNewApiLiveModels(tabitokenClient, conn),
   zed: async (conn) => {
     const result = await resolveZedModels({
       accessToken: conn.accessToken,
@@ -415,7 +425,7 @@ export async function buildModelsList(kindFilter, options = {}) {
       const liveResolver = LIVE_MODEL_RESOLVERS[providerId];
       if (liveResolver) {
         try {
-          const liveResults = providerId === "gorouter"
+          const liveResults = PER_ACCOUNT_LIVE_PROVIDERS.has(providerId)
             ? await Promise.all(
                 (activeConnectionsByProvider.get(providerId) || [conn]).map(async (candidate) => {
                   const live = await liveResolver(candidate);

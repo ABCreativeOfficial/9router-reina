@@ -18,12 +18,17 @@ vi.mock("@/models", () => ({
 }));
 
 vi.mock("open-sse/services/gorouter.js", () => ({
-  validateGoRouterManagementCredentials: mocks.validate,
-  listGoRouterTokens: mocks.list,
-  retrieveGoRouterTokenKey: mocks.retrieve,
-  validateGoRouterInferenceKey: mocks.validateInference,
-  fetchGoRouterModels: mocks.models,
-  normalizeGoRouterUserId: (value) => (/^\d+$/.test(String(value ?? "").trim()) ? String(value).trim() : ""),
+  // The bootstrap binding now talks to the shared New API client object, so the
+  // mock mirrors that surface rather than the old per-function exports.
+  gorouterClient: {
+    label: "GoRouter",
+    activeStatus: 1,
+    getAccount: mocks.validate,
+    listTokens: mocks.list,
+    retrieveTokenKey: mocks.retrieve,
+    validateInferenceKey: mocks.validateInference,
+    fetchModels: mocks.models,
+  },
 }));
 
 import { POST } from "../../src/app/api/providers/gorouter/bootstrap/route.js";

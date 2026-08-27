@@ -17,6 +17,7 @@ import { getDeepseekUsage } from "./usage/deepseek.js";
 import { getGroqUsage } from "./usage/groq.js";
 import { getZedUsage } from "./usage/zed.js";
 import { getGoRouterUsage } from "./usage/gorouter.js";
+import { getTabiTokenUsage } from "./usage/tabitoken.js";
 import { resolveQoderCredentials } from "./qoderModels.js";
 import { getGlmUsage } from "./usage/glm.js";
 import {
@@ -60,6 +61,7 @@ const USAGE_HANDLERS = {
   groq: (c) => getGroqUsage(c.apiKey, c.proxyOptions),
   zed: (c) => getZedUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
   gorouter: (c) => getGoRouterUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
+  tabitoken: (c) => getTabiTokenUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
 };
 
 export async function getUsageForProvider(connection, proxyOptions = null, options = {}) {

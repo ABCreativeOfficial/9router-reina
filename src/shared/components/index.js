@@ -31,6 +31,7 @@ export { default as CursorAuthModal } from "./CursorAuthModal";
 export { default as IFlowCookieModal } from "./IFlowCookieModal";
 export { default as GitLabAuthModal } from "./GitLabAuthModal";
 export { default as GoRouterAuthModal } from "./GoRouterAuthModal";
+export { default as NewApiManualAuthModal } from "./NewApiManualAuthModal";
 export { default as EditConnectionModal } from "./EditConnectionModal";
 export { default as ModelAccessModal } from "./ModelAccessModal";
 export { default as AddCustomEmbeddingModal } from "./AddCustomEmbeddingModal";

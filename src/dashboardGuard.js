@@ -96,6 +96,7 @@ const LOCAL_ONLY_PATHS = [
   "/api/providers/gorouter/bootstrap",
   "/api/providers/gorouter/pair/start",
   "/api/providers/gorouter/pair/status",
+  "/api/providers/tabitoken/bootstrap",
   "/api/auth/reset-password",
   "/api/headroom/start",
   "/api/headroom/stop",
