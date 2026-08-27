@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, getProviderNodes, updateProviderConnection, updateProviderNode } from "@/models";
+import { isNewApiNode } from "open-sse/services/newapi/definition.js";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
@@ -13,12 +14,34 @@ export async function PUT(request, { params }) {
       return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
     }
 
+    // A New API provider's origin is immutable: this handler re-syncs `baseUrl`
+    // onto every connection, so retargeting it would send stored inference keys
+    // and management tokens to a different host. Delete and re-add instead.
+    if (isNewApiNode(node)) {
+      return NextResponse.json(
+        { error: "A New API provider cannot be edited. Delete it and add it again to change its origin." },
+        { status: 409 },
+      );
+    }
+
     if (!name?.trim()) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
 
     if (!prefix?.trim()) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
+    }
+
+    // Same namespace rule as create: a prefix may not shadow another node's.
+    // Excludes this node so it keeps its own, and does not re-validate the format,
+    // so a pre-existing prefix stays editable.
+    const cleanPrefix = prefix.trim();
+    const otherNodes = (await getProviderNodes()).filter((entry) => entry.id !== id);
+    if (otherNodes.some((entry) => entry.prefix === cleanPrefix || entry.id === cleanPrefix)) {
+      return NextResponse.json(
+        { error: `Prefix "${cleanPrefix}" is already in use.` },
+        { status: 409 },
+      );
     }
 
     // Only validate apiType for OpenAI Compatible nodes
@@ -50,7 +73,7 @@ export async function PUT(request, { params }) {
 
     const updates = {
       name: name.trim(),
-      prefix: prefix.trim(),
+      prefix: cleanPrefix,
       baseUrl: sanitizedBaseUrl,
     };
 
@@ -65,7 +88,7 @@ export async function PUT(request, { params }) {
       updateProviderConnection(connection.id, {
         providerSpecificData: {
           ...(connection.providerSpecificData || {}),
-          prefix: prefix.trim(),
+          prefix: cleanPrefix,
           apiType: node.type === "openai-compatible" ? apiType : undefined,
           baseUrl: sanitizedBaseUrl,
           nodeName: updated.name,

@@ -170,24 +170,36 @@ describe("prepareConnectionForImport", () => {
     expect(data.providerSpecificData.enabledModels).toEqual(["a"]);
   });
 
-  it("round-trips GoRouter inference and management credentials", () => {
+  it("round-trips New API inference and management credentials", () => {
+    const provider = "openai-compatible-chat-example";
     const src = {
-      id: "gr-1",
-      provider: "gorouter",
+      id: "na-1",
+      provider,
       authType: "apikey",
-      name: "GoRouter A",
+      name: "Example API A",
       apiKey: "inference-secret",
       accessToken: "management-secret",
-      providerSpecificData: { userId: "123", enabledModels: ["model-a"] },
+      providerSpecificData: {
+        userId: "123",
+        enabledModels: ["model-a"],
+        newApiOrigin: "https://example.com",
+        newApiLabel: "Example API",
+      },
     };
     const exported = serializeConnectionForExport(src);
-    const { data } = prepareConnectionForImport(exported, "gorouter");
+    const { data } = prepareConnectionForImport(exported, provider);
     expect(data).toMatchObject({
-      provider: "gorouter",
+      provider,
       authType: "apikey",
       apiKey: "inference-secret",
       accessToken: "management-secret",
-      providerSpecificData: { userId: "123", enabledModels: ["model-a"] },
+      providerSpecificData: {
+        userId: "123",
+        enabledModels: ["model-a"],
+        // The family markers must survive: usage/models resolution reads them.
+        newApiOrigin: "https://example.com",
+        newApiLabel: "Example API",
+      },
     });
     expect(redactConnection(data)).not.toHaveProperty("apiKey");
     expect(redactConnection(data)).not.toHaveProperty("accessToken");
