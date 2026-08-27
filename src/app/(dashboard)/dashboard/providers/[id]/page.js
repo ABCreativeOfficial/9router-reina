@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, GoRouterAuthModal, Toggle, Select, EditConnectionModal, ModelAccessModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, GoRouterAuthModal, NewApiManualAuthModal, Toggle, Select, EditConnectionModal, ModelAccessModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -51,6 +51,8 @@ export default function ProviderDetailPage() {
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
   const [showGoRouterAuthModal, setShowGoRouterAuthModal] = useState(false);
   const [goRouterReconnectUserId, setGoRouterReconnectUserId] = useState(null);
+  const [showNewApiManualModal, setShowNewApiManualModal] = useState(false);
+  const [newApiReconnectUserId, setNewApiReconnectUserId] = useState(null);
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
   const [showBulkImportGrokCli, setShowBulkImportGrokCli] = useState(false);
@@ -130,6 +132,11 @@ export default function ProviderDetailPage() {
       setShowGoRouterAuthModal(true);
       return;
     }
+    if (isNewApiManualProvider) {
+      setNewApiReconnectUserId(null);
+      setShowNewApiManualModal(true);
+      return;
+    }
     if (isOAuth) {
       triggerOAuthConnection();
       return;
@@ -165,7 +172,14 @@ export default function ProviderDetailPage() {
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
   const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
   const staticModels = getModelsByProviderId(providerId);
-  const models = (providerId === "cursor" || providerId === "zed" || providerId === "gorouter") && liveModels.length > 0
+  // New API deployments (GoRouter, TabiToken) serve an account-specific catalog,
+  // so the dashboard reads live models per connection instead of the registry.
+  // zed (upstream) is also live-only: the static registry carries no usable list.
+  const isNewApiProvider = providerId === "gorouter" || providerId === "tabitoken";
+  // TabiToken has no browser bridge, so it onboards through the generic manual modal.
+  const isNewApiManualProvider = providerId === "tabitoken";
+  const perAccountLiveModels = isNewApiProvider || providerId === "cursor" || providerId === "zed";
+  const models = perAccountLiveModels && liveModels.length > 0
     ? liveModels
     : staticModels;
   const providerAlias = getProviderAlias(providerId);
@@ -220,7 +234,7 @@ export default function ProviderDetailPage() {
   const modelCatalog = buildProviderModelCatalog({
     staticModels,
     liveModels,
-    preferLiveModels: providerId === "cursor" || providerId === "gorouter",
+    preferLiveModels: perAccountLiveModels,
     kiloFreeModels,
     customModels,
     modelAliases,
@@ -229,10 +243,10 @@ export default function ProviderDetailPage() {
   });
   const modelAccessCatalog = buildProviderModelCatalog({
     staticModels,
-    liveModels: providerId === "gorouter" && selectedConnection?.id
+    liveModels: isNewApiProvider && selectedConnection?.id
       ? liveModelsByConnection[selectedConnection.id] || []
       : liveModels,
-    preferLiveModels: providerId === "cursor" || providerId === "gorouter",
+    preferLiveModels: perAccountLiveModels,
     kiloFreeModels,
     customModels,
     modelAliases,
@@ -506,19 +520,19 @@ export default function ProviderDetailPage() {
 
   // Live per-connection catalogs. cursor/zed: the static registry carries no
   // usable list, so resolve from the active connection and surface a warning
-  // when it is empty. GoRouter: the dashboard list is the union across active
-  // accounts; per-account restrictions still enforce routing eligibility in
-  // accountModelPolicy. Fires only when the provider id or connections change.
+  // when it is empty. New API deployments: the dashboard list is the union
+  // across active accounts; per-account restrictions still enforce routing
+  // eligibility in accountModelPolicy. Fires only when the provider id or
+  // connections change — no polling, no loop.
   useEffect(() => {
-    const isLiveCatalog = providerId === "cursor" || providerId === "zed";
-    const isMultiAccountCatalog = providerId === "gorouter";
-    if (!isLiveCatalog && !isMultiAccountCatalog) {
+    if (!perAccountLiveModels) {
       setLiveModels([]);
       return;
     }
 
-    if (isMultiAccountCatalog) {
-      const activeConnections = connections.filter((item) => item.isActive !== false);
+    const activeConnections = connections.filter((item) => item.isActive !== false);
+
+    if (isNewApiProvider) {
       if (!activeConnections.length) return;
 
       let cancelled = false;
@@ -547,7 +561,7 @@ export default function ProviderDetailPage() {
       return () => { cancelled = true; };
     }
 
-    const connection = connections.find((item) => item.isActive !== false);
+    const connection = activeConnections[0];
     if (!connection?.id) {
       setLiveModels([]);
       if (providerId === "zed") setLiveModelsError(null);
@@ -578,7 +592,7 @@ export default function ProviderDetailPage() {
       });
 
     return () => { cancelled = true; };
-  }, [providerId, connections]);
+  }, [perAccountLiveModels, isNewApiProvider, connections]);
 
   // Fetch suggested models from provider's public API (if configured)
   useEffect(() => {
@@ -1152,10 +1166,19 @@ export default function ProviderDetailPage() {
                   setSelectedConnection(conn);
                   setShowModelAccessModal(true);
                 }}
-                onReconnect={providerId === "gorouter" && conn.providerSpecificData?.userId ? () => {
-                  setGoRouterReconnectUserId(String(conn.providerSpecificData.userId));
-                  setShowGoRouterAuthModal(true);
-                } : undefined}
+                onReconnect={
+                  providerId === "gorouter" && conn.providerSpecificData?.userId
+                    ? () => {
+                      setGoRouterReconnectUserId(String(conn.providerSpecificData.userId));
+                      setShowGoRouterAuthModal(true);
+                    }
+                    : isNewApiManualProvider && conn.providerSpecificData?.userId
+                      ? () => {
+                        setNewApiReconnectUserId(String(conn.providerSpecificData.userId));
+                        setShowNewApiManualModal(true);
+                      }
+                      : undefined
+                }
                 onDelete={() => handleDelete(conn.id)}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
               />
@@ -1801,6 +1824,20 @@ export default function ProviderDetailPage() {
                       Connect GoRouter
                     </Button>
                   )}
+                  {isNewApiManualProvider && (
+                    <Button
+                      size="sm"
+                      icon="login"
+                      variant="secondary"
+                      onClick={() => {
+                        setNewApiReconnectUserId(null);
+                        setShowNewApiManualModal(true);
+                      }}
+                      className="w-full sm:w-auto"
+                    >
+                      {`Connect ${providerInfo.name}`}
+                    </Button>
+                  )}
                   {hasDualAuthModes ? (
                     <>
                       <Button
@@ -1821,7 +1858,7 @@ export default function ProviderDetailPage() {
                         {apiKeyConnectionLabel}
                       </Button>
                     </>
-                  ) : providerId !== "gorouter" && (
+                  ) : !isNewApiProvider && (
                     <Button
                       size="sm"
                       icon="add"
@@ -1969,6 +2006,22 @@ export default function ProviderDetailPage() {
         onClose={() => {
           setShowGoRouterAuthModal(false);
           setGoRouterReconnectUserId(null);
+        }}
+      />
+      <NewApiManualAuthModal
+        isOpen={showNewApiManualModal}
+        provider={providerId}
+        label={providerInfo.name}
+        website={providerInfo.website}
+        expectedUserId={newApiReconnectUserId}
+        onSuccess={() => {
+          setShowNewApiManualModal(false);
+          setNewApiReconnectUserId(null);
+          fetchConnections();
+        }}
+        onClose={() => {
+          setShowNewApiManualModal(false);
+          setNewApiReconnectUserId(null);
         }}
       />
       <AddApiKeyModal
