@@ -26,6 +26,8 @@ import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
 import AddCompatibleModal from "./components/AddCompatibleModal";
 import { STATUS_FILTER_OPTIONS, matchesStatusFilter } from "./utils";
+import AddNewApiProviderModal from "./components/AddNewApiProviderModal";
+import { NEW_API_FAMILY, NEW_API_NODE_TYPE } from "open-sse/services/newapi/definition.js";
 
 function getStatusDisplay(connected, error, errorCode) {
   const parts = [];
@@ -104,6 +106,7 @@ export default function ProvidersPage() {
   const [showAddCompatibleModal, setShowAddCompatibleModal] = useState(false);
   const [showAddAnthropicCompatibleModal, setShowAddAnthropicCompatibleModal] =
     useState(false);
+  const [showAddNewApiModal, setShowAddNewApiModal] = useState(false);
   const [testingMode, setTestingMode] = useState(null);
   const [testResults, setTestResults] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -263,8 +266,13 @@ export default function ProvidersPage() {
     }
   };
 
+  // New API definitions share the openai-compatible node namespace (their
+  // inference IS OpenAI chat-completions), so the family marker is what keeps the
+  // two sections separate.
+  const isNewApiNodeRecord = (node) => node.family === NEW_API_FAMILY;
+
   const compatibleProviders = providerNodes
-    .filter((node) => node.type === "openai-compatible")
+    .filter((node) => node.type === "openai-compatible" && !isNewApiNodeRecord(node))
     .map((node) => ({
       id: node.id,
       name: node.name || "OpenAI Compatible",
@@ -276,8 +284,22 @@ export default function ProvidersPage() {
       (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
     );
 
+  const newApiProviders = providerNodes
+    .filter(isNewApiNodeRecord)
+    .map((node) => ({
+      id: node.id,
+      name: node.name || "New API",
+      color: "#7C3AED",
+      textIcon: "NA",
+      family: NEW_API_FAMILY,
+      origin: node.newApi?.origin || "",
+    }))
+    .filter(
+      (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
+    );
+
   const anthropicCompatibleProviders = providerNodes
-    .filter((node) => node.type === "anthropic-compatible")
+    .filter((node) => node.type === "anthropic-compatible" && !isNewApiNodeRecord(node))
     .map((node) => ({
       id: node.id,
       name: node.name || "Anthropic Compatible",
@@ -382,6 +404,7 @@ export default function ProvidersPage() {
     freeTierEntries.length > 0 ||
     apikeyEntries.length > 0 ||
     compatibleProviders.length > 0 ||
+    newApiProviders.length > 0 ||
     anthropicCompatibleProviders.length > 0;
 
   return (
@@ -460,6 +483,44 @@ export default function ProvidersPage() {
                 />
               ),
             )}
+          </div>
+        )}
+      </div>
+
+      {/* New API Providers — user-created deployments of QuantumNous/new-api.
+          Kept separate from the OpenAI/Anthropic compatible section because these
+          additionally manage account credentials, dynamic models and quota. */}
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
+            New API Providers
+          </h2>
+          <Button
+            size="sm"
+            icon="add"
+            onClick={() => setShowAddNewApiModal(true)}
+            className="w-full sm:w-auto"
+          >
+            Add New API Provider
+          </Button>
+        </div>
+        {newApiProviders.length === 0 ? (
+          <div className="flex items-center justify-center gap-2 py-2 border border-dashed border-border rounded-xl text-text-muted text-sm">
+            <span className="material-symbols-outlined text-[18px]">hub</span>
+            <span>No New API providers added yet.</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+            {newApiProviders.map((info) => (
+              <ApiKeyProviderCard
+                key={info.id}
+                providerId={info.id}
+                provider={info}
+                stats={getProviderStats(info.id, "apikey")}
+                authType="compatible"
+                onToggle={(active) => handleToggleProvider(info.id, "apikey", active)}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -661,6 +722,24 @@ export default function ProvidersPage() {
           setShowAddAnthropicCompatibleModal(false);
         }}
       />
+      <AddNewApiProviderModal
+        isOpen={showAddNewApiModal}
+        onClose={() => setShowAddNewApiModal(false)}
+        onCreated={(provider) => {
+          // The create route returns the safe definition projection; re-shape it
+          // into the node record this page's derived lists read.
+          setProviderNodes((prev) => [...prev, {
+            id: provider.id,
+            type: NEW_API_NODE_TYPE,
+            family: NEW_API_FAMILY,
+            name: provider.name,
+            prefix: provider.alias,
+            baseUrl: provider.baseUrl,
+            newApi: { origin: provider.origin },
+          }]);
+          setShowAddNewApiModal(false);
+        }}
+      />
 
       {/* Test Results Modal */}
       {testResults && (
@@ -811,7 +890,11 @@ function ApiKeyProviderCard({
   onToggle,
 }) {
   const { connected, error, errorCode, errorTime, allDisabled } = stats;
-  const isCompatible = providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
+  // A New API definition shares the openai-compatible id namespace, so the id
+  // prefix alone would label it "Chat" and give it an OpenAI icon. The family
+  // marker rides along on the mapped provider object.
+  const isNewApi = provider.family === NEW_API_FAMILY;
+  const isCompatible = !isNewApi && providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
   const isAnthropicCompatible = providerId.startsWith(
     ANTHROPIC_COMPATIBLE_PREFIX,
   );

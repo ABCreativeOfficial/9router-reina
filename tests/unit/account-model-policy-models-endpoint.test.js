@@ -6,8 +6,7 @@ const mocks = vi.hoisted(() => ({
   getCustomModels: vi.fn(async () => []),
   getModelAliases: vi.fn(async () => ({})),
   getDisabledModels: vi.fn(async () => ({})),
-  fetchGoRouterModels: vi.fn(),
-  fetchTabiTokenModels: vi.fn(),
+  fetchNewApiModels: vi.fn(),
 }));
 
 vi.mock("@/lib/localDb", () => ({
@@ -23,12 +22,14 @@ vi.mock("@/lib/disabledModelsDb", () => ({
 
 vi.mock("@/sse/services/tokenRefresh", () => ({ updateProviderCredentials: vi.fn() }));
 
-vi.mock("open-sse/services/gorouter.js", () => ({
-  gorouterClient: { fetchModels: mocks.fetchGoRouterModels },
-}));
-
-vi.mock("open-sse/services/tabitoken.js", () => ({
-  tabitokenClient: { fetchModels: mocks.fetchTabiTokenModels },
+// The route resolves a management client from each connection's own trusted
+// origin; only that factory is stubbed, so the family detection stays real.
+vi.mock("open-sse/services/newapi/resolve.js", () => ({
+  createNewApiClientForConnection: (connection) => (
+    connection?.providerSpecificData?.newApiOrigin
+      ? { fetchModels: mocks.fetchNewApiModels }
+      : null
+  ),
 }));
 
 vi.mock("@/lib/network/connectionProxy", () => ({
@@ -102,34 +103,51 @@ describe("/v1/models — per-account policy visibility", () => {
     expect(await idsFor()).toEqual([qualified(MODEL_A)]);
   });
 
-  it("unions each GoRouter account catalog after applying its allowlist", async () => {
+  // A New API provider id is user-created: it lives in the openai-compatible
+  // namespace and is in no static registry list. `newApiOrigin` on the connection
+  // is what makes it per-account live.
+  const NEW_API_PROVIDER = "openai-compatible-chat-example";
+  const newApiConn = (id, userId, enabledModels) => ({
+    id,
+    provider: NEW_API_PROVIDER,
+    isActive: true,
+    accessToken: `management-${id}`,
+    providerSpecificData: {
+      userId,
+      prefix: "ex",
+      newApiOrigin: "https://example.com",
+      newApiLabel: "Example API",
+      ...(enabledModels ? { enabledModels } : {}),
+    },
+  });
+
+  it("unions each New API account catalog after applying its allowlist", async () => {
     mocks.getProviderConnections.mockResolvedValue([
-      { id: "A", provider: "gorouter", isActive: true, accessToken: "ma", providerSpecificData: { userId: "1", enabledModels: ["model-a"] } },
-      { id: "B", provider: "gorouter", isActive: true, accessToken: "mb", providerSpecificData: { userId: "2", enabledModels: ["model-b"] } },
+      newApiConn("A", "1", ["model-a"]),
+      newApiConn("B", "2", ["model-b"]),
     ]);
-    mocks.fetchGoRouterModels
+    mocks.fetchNewApiModels
       .mockResolvedValueOnce({ ok: true, models: [{ id: "model-a" }, { id: "model-x" }] })
       .mockResolvedValueOnce({ ok: true, models: [{ id: "model-b" }, { id: "model-y" }] });
 
     const models = await buildModelsList(["llm"], { skipDynamicFetch: true });
-    const ids = models.filter((model) => model.owned_by === "gor").map((model) => model.id).sort();
-    expect(ids).toEqual(["gor/model-a", "gor/model-b"]);
-    expect(mocks.fetchGoRouterModels).toHaveBeenCalledTimes(2);
+    const ids = models.filter((model) => model.owned_by === "ex").map((model) => model.id).sort();
+    expect(ids).toEqual(["ex/model-a", "ex/model-b"]);
+    expect(mocks.fetchNewApiModels).toHaveBeenCalledTimes(2);
   });
 
-  it("applies the same per-account union to the second New API deployment", async () => {
+  it("an unrestricted New API account keeps its whole catalog visible", async () => {
     mocks.getProviderConnections.mockResolvedValue([
-      { id: "A", provider: "tabitoken", isActive: true, accessToken: "ma", providerSpecificData: { userId: "1", enabledModels: ["model-a"] } },
-      { id: "B", provider: "tabitoken", isActive: true, accessToken: "mb", providerSpecificData: { userId: "2" } },
+      newApiConn("A", "1", ["model-a"]),
+      newApiConn("B", "2"),
     ]);
-    mocks.fetchTabiTokenModels
+    mocks.fetchNewApiModels
       .mockResolvedValueOnce({ ok: true, models: [{ id: "model-a" }, { id: "model-x" }] })
-      // Unrestricted account: its whole catalog stays visible.
       .mockResolvedValueOnce({ ok: true, models: [{ id: "model-b" }] });
 
     const models = await buildModelsList(["llm"], { skipDynamicFetch: true });
-    const ids = models.filter((model) => model.owned_by === "tbt").map((model) => model.id).sort();
-    expect(ids).toEqual(["tbt/model-a", "tbt/model-b"]);
-    expect(mocks.fetchTabiTokenModels).toHaveBeenCalledTimes(2);
+    const ids = models.filter((model) => model.owned_by === "ex").map((model) => model.id).sort();
+    expect(ids).toEqual(["ex/model-a", "ex/model-b"]);
+    expect(mocks.fetchNewApiModels).toHaveBeenCalledTimes(2);
   });
 });

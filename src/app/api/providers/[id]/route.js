@@ -23,6 +23,23 @@ function normalizeEnabledModelsUpdate(providerSpecificData) {
   return { hasEnabledModelsField: true, enabledModels: sanitizeEnabledModels(raw) };
 }
 
+// Keys the SERVER owns on a connection's providerSpecificData. Each is written
+// from the provider-node record (buildNewApiConnectionData, and the node re-sync
+// in /api/provider-nodes/[id]) — never by the connection editor.
+//
+// They must be stripped from an incoming PUT body: `newApiOrigin` is the trusted
+// management target, so accepting it here would let any connection (including an
+// OAuth row) be pointed at an arbitrary host, and the family-based usage/models
+// hooks would then send that row's accessToken there as a Bearer token.
+const SERVER_OWNED_PSD_KEYS = ["newApiOrigin", "newApiLabel", "baseUrl", "prefix", "apiType", "nodeName"];
+
+function stripServerOwnedPsd(providerSpecificData) {
+  if (!providerSpecificData || typeof providerSpecificData !== "object") return providerSpecificData;
+  const next = { ...providerSpecificData };
+  for (const key of SERVER_OWNED_PSD_KEYS) delete next[key];
+  return next;
+}
+
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
     Object.prototype.hasOwnProperty.call(body, "connectionProxyEnabled") ||
@@ -159,7 +176,7 @@ export async function PUT(request, { params }) {
     ) {
       updateData.providerSpecificData = {
         ...(existing.providerSpecificData || {}),
-        ...(providerSpecificData || {}),
+        ...stripServerOwnedPsd(providerSpecificData || {}),
       };
 
       if (proxyConfig.hasAnyProxyField) {

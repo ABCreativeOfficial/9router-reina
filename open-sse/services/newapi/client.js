@@ -54,6 +54,12 @@ function normalizeOrigin(origin) {
   return cleaned;
 }
 
+/** A New API timestamp is unix seconds; -1 on `expired_time` means "never". */
+function optionalNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function safeTokenMetadata(item) {
   if (!item || typeof item !== "object") return null;
   const id = Number(item.id);
@@ -66,8 +72,13 @@ function safeTokenMetadata(item) {
     group: cleanString(item.group, 100),
     unlimitedQuota: item.unlimited_quota === true,
     modelLimitsEnabled: item.model_limits_enabled === true,
-    remainQuota: Number.isFinite(Number(item.remain_quota)) ? Number(item.remain_quota) : null,
-    usedQuota: Number.isFinite(Number(item.used_quota)) ? Number(item.used_quota) : null,
+    remainQuota: optionalNumber(item.remain_quota),
+    usedQuota: optionalNumber(item.used_quota),
+    // Selection metadata. Absent/garbage values stay null so the caller's sort
+    // can fall back rather than treating a missing timestamp as epoch 0.
+    expiredTime: optionalNumber(item.expired_time),
+    accessedTime: optionalNumber(item.accessed_time),
+    createdTime: optionalNumber(item.created_time),
   };
 }
 
@@ -130,7 +141,7 @@ export function createNewApiClient(config) {
     "User-Agent": userAgent,
   });
 
-  async function requestJson(url, { accessToken, userId, method = "GET", proxyOptions = null } = {}) {
+  async function requestJson(url, { accessToken, userId, method = "GET", body = null, proxyOptions = null } = {}) {
     const token = cleanString(accessToken, MAX_TOKEN_LENGTH);
     const normalizedUserId = normalizeNewApiUserId(userId);
     if (!token || !normalizedUserId) {
@@ -138,9 +149,12 @@ export function createNewApiClient(config) {
     }
 
     try {
+      const headers = managementHeaders(token, normalizedUserId);
+      if (body !== null) headers["Content-Type"] = "application/json";
       const response = await proxyAwareFetch(url, {
         method,
-        headers: managementHeaders(token, normalizedUserId),
+        headers,
+        ...(body !== null ? { body: JSON.stringify(body) } : {}),
         redirect: "error",
         signal: AbortSignal.timeout(timeoutMs),
       }, proxyOptions);
@@ -253,6 +267,43 @@ export function createNewApiClient(config) {
     return { ok: true, models };
   }
 
+  /**
+   * Create a token dedicated to 9Router.
+   *
+   * Upstream `POST /api/token/` (QuantumNous/new-api `controller.AddToken`) returns
+   * only `{success, message}` — no id and no key — so the caller must re-list and
+   * match on the unique name it supplied. `expired_time: -1` means never expires;
+   * `unlimited_quota: true` makes `remain_quota` irrelevant. `group: ""` inherits
+   * the account's own group, so no deployment-specific group is hardcoded.
+   * `model_limits`/`allow_ips` are upstream *strings*, not arrays.
+   */
+  async function createToken(accessToken, userId, { name, proxyOptions = null } = {}) {
+    const tokenName = cleanString(name, 50);
+    if (!tokenName) {
+      return { ok: false, status: 400, message: `${label} token name is required.` };
+    }
+    const result = await requestJson(endpoints.tokens, {
+      accessToken,
+      userId,
+      method: "POST",
+      body: {
+        name: tokenName,
+        expired_time: -1,
+        unlimited_quota: true,
+        remain_quota: 0,
+        model_limits_enabled: false,
+        model_limits: "",
+        allow_ips: "",
+        group: "",
+      },
+      proxyOptions,
+    });
+    if (!result.ok) {
+      return { ok: false, status: result.status || 502, message: `Unable to create a ${label} API token.` };
+    }
+    return { ok: true, name: tokenName };
+  }
+
   /** Public deployment config (quota display type, quota_per_unit, exchange rates). */
   async function fetchStatus(proxyOptions = null) {
     try {
@@ -277,6 +328,7 @@ export function createNewApiClient(config) {
     requestJson,
     getAccount,
     listTokens,
+    createToken,
     retrieveTokenKey,
     validateInferenceKey,
     fetchModels,
