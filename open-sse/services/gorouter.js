@@ -90,6 +90,7 @@ export async function getGoRouterAccount(accessToken, userId, proxyOptions = nul
     account: {
       id: normalizedUserId,
       displayName: cleanString(account.display_name, 200),
+      username: cleanString(account.username, 200),
       group: cleanString(account.group, 100),
       status: account.status,
       quota: Number(account.quota),
