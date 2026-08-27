@@ -305,10 +305,12 @@ function buildLayout(providers, activeSet, lastSet, errorSet) {
     const error = !active && errorSet.has(p.provider?.toLowerCase());
     const nodeId = `provider-${p.provider}`;
     const data = {
-      label: (config.name !== p.provider ? config.name : null) || p.nodeName || p.name || p.provider,
+      // `providers` is already provider-level. Never fall back to `p.name`: older
+      // connection-shaped inputs used that field for account names.
+      label: p.label || (config.name !== p.provider ? config.name : null) || p.provider,
       color: config.color || "#6b7280",
-      imageUrl: getProviderImageUrl(p.provider),
-      textIcon: config.textIcon || (p.provider || "?").slice(0, 2).toUpperCase(),
+      imageUrl: p.isNewApi ? null : getProviderImageUrl(p.provider),
+      textIcon: p.textIcon || config.textIcon || (p.provider || "?").slice(0, 2).toUpperCase(),
       active,
     };
 
@@ -473,9 +475,11 @@ export default function ProviderTopology({ providers = [], activeRequests = [], 
 
 ProviderTopology.propTypes = {
   providers: PropTypes.arrayOf(PropTypes.shape({
-    id: PropTypes.string,
     provider: PropTypes.string,
-    name: PropTypes.string,
+    label: PropTypes.string,
+    textIcon: PropTypes.string,
+    isNewApi: PropTypes.bool,
+    connectionCount: PropTypes.number,
   })),
   activeRequests: PropTypes.arrayOf(PropTypes.shape({
     provider: PropTypes.string,
