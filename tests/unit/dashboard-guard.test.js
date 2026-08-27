@@ -248,8 +248,34 @@ describe("dashboard guard local-only access", () => {
     expect(local).toBe(mocks.nextResponse);
   });
 
-  it("protects connection export and import when login is disabled", async () => {
-    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+  it("keeps GoRouter pairing start and status local-only", async () => {
+    for (const pathname of [
+      "/api/providers/gorouter/pair/start",
+      "/api/providers/gorouter/pair/status",
+    ]) {
+      const remote = await proxy(request(pathname, { host: "router.example.com" }));
+      expect(remote.status).toBe(403);
+
+      const cli = await proxy(request(pathname, {
+        host: "router.example.com",
+        "x-9r-cli-token": "cli-token",
+      }));
+      expect(cli).toBe(mocks.nextResponse);
+    }
+  });
+
+  it("lets the GoRouter bridge post pair completion without a dashboard session", async () => {
+    // The extension posts from the gorouter.app page context and has no cookie;
+    // the route's one-time pairing secret is the authorization, not this gate.
+    const response = await proxy(request("/api/providers/gorouter/pair/complete", {
+      host: "localhost:20128",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+    expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+
+  it("protects connection export and import when login is disabled", async () => {    mocks.getSettings.mockResolvedValue({ requireLogin: false });
 
     for (const pathname of ["/api/providers/export", "/api/providers/import"]) {
       const remote = await proxy(request(pathname, { host: "router.example.com" }));
