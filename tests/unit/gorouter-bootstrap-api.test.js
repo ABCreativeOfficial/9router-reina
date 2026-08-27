@@ -39,7 +39,7 @@ function request(body) {
 describe("GoRouter bootstrap API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.validate.mockResolvedValue({ ok: true, account: { id: "123", displayName: "Account", group: "default", status: 1 } });
+    mocks.validate.mockResolvedValue({ ok: true, account: { id: "123", displayName: "Account", username: "acct-login", group: "default", status: 1 } });
     mocks.list.mockResolvedValue({ ok: true, tokens: [{ id: 7, name: "Reusable", maskedKey: "abcd**********wxyz", status: 1 }] });
     mocks.retrieve.mockResolvedValue({ ok: true, apiKey: "full-inference-key" });
     mocks.validateInference.mockResolvedValue({ ok: true });
@@ -158,5 +158,76 @@ describe("GoRouter bootstrap API", () => {
     const created = mocks.createProviderConnection.mock.calls[0][0];
     expect(created.providerSpecificData).toEqual({ userId: "123" });
     expect(created.name).not.toBe("Account");
+  });
+
+  describe("new connection naming", () => {
+    const connect = () => POST(request({
+      managementToken: "management-token",
+      userId: "123",
+      tokenId: 7,
+      action: "connect",
+    }));
+
+    it("names a new account from display_name, ignoring the token name", async () => {
+      mocks.list.mockResolvedValue({ ok: true, tokens: [{ id: 7, name: "9router", status: 1 }] });
+
+      expect((await connect()).status).toBe(201);
+      expect(mocks.createProviderConnection.mock.calls[0][0].name).toBe("Account");
+    });
+
+    it("falls back to username when display_name is empty", async () => {
+      mocks.validate.mockResolvedValue({
+        ok: true,
+        account: { id: "123", displayName: "", username: "acct-login", group: "default", status: 1 },
+      });
+      mocks.list.mockResolvedValue({ ok: true, tokens: [{ id: 7, name: "9router", status: 1 }] });
+
+      await connect();
+      expect(mocks.createProviderConnection.mock.calls[0][0].name).toBe("acct-login");
+    });
+
+    it("falls back to GoRouter <userId> when the account has no names", async () => {
+      mocks.validate.mockResolvedValue({
+        ok: true,
+        account: { id: "123", displayName: "", username: "", group: "default", status: 1 },
+      });
+      mocks.list.mockResolvedValue({ ok: true, tokens: [{ id: 7, name: "9router", status: 1 }] });
+
+      await connect();
+      expect(mocks.createProviderConnection.mock.calls[0][0].name).toBe("GoRouter 123");
+    });
+
+    it("still uniquifies a generated name that already exists", async () => {
+      mocks.getProviderConnections.mockResolvedValue([
+        { id: "other-1", provider: "gorouter", name: "Account", providerSpecificData: { userId: "999" } },
+      ]);
+      mocks.list.mockResolvedValue({ ok: true, tokens: [{ id: 7, name: "9router", status: 1 }] });
+
+      await connect();
+      expect(mocks.createProviderConnection.mock.calls[0][0].name).toBe("Account (2)");
+    });
+
+    it("reconnect preserves a user-customized connection name", async () => {
+      mocks.getProviderConnections.mockResolvedValue([
+        {
+          id: "existing-1",
+          provider: "gorouter",
+          name: "My Custom Name",
+          providerSpecificData: { userId: "123" },
+        },
+      ]);
+
+      const response = await POST(request({
+        managementToken: "management-token",
+        userId: "123",
+        tokenId: 7,
+        name: "Account",
+        action: "connect",
+      }));
+
+      expect(response.status).toBe(200);
+      expect(mocks.createProviderConnection).not.toHaveBeenCalled();
+      expect(mocks.updateProviderConnection.mock.calls[0][1]).not.toHaveProperty("name");
+    });
   });
 });
