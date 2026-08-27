@@ -152,8 +152,6 @@ import p155 from "./synthetic.js";
 import p156 from "./opendesign-go.js";
 import p157 from "./deeprelay.js";
 import p158 from "./qwencloud.js";
-import p124g from "./gorouter.js";
-import p125t from "./tabitoken.js";
 export default [
   p0,
   p1,
@@ -306,6 +304,4 @@ export default [
   p156,
   p157,
   p158,
-  p124g,
-  p125t,
 ];
