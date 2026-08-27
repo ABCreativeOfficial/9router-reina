@@ -201,11 +201,11 @@
     "baseUrl": "https://chatgpt.com/backend-api/codex/responses",
     "format": "openai-responses",
     "forceStream": true,
-    "cliVersion": "0.155.0",
+    "cliVersion": "0.159.0",
     "headers": {
       "originator": "codex_cli_rs",
-      "User-Agent": "codex_cli_rs/0.155.0",
-      "version": "0.155.0"
+      "User-Agent": "codex_cli_rs/0.159.0",
+      "version": "0.159.0"
     },
     "usage": {
       "url": "https://chatgpt.com/backend-api/wham/usage",
@@ -1158,25 +1158,5 @@
         }
       }
     ]
-  },
-  "gorouter": {
-    "baseUrl": "https://gorouter.app/v1/chat/completions",
-    "validateUrl": "https://gorouter.app/v1/models",
-    "auth": {
-      "combined": true,
-      "header": "Authorization",
-      "scheme": "bearer"
-    },
-    "format": "openai"
-  },
-  "tabitoken": {
-    "baseUrl": "https://tabitoken.com/v1/chat/completions",
-    "validateUrl": "https://tabitoken.com/v1/models",
-    "auth": {
-      "combined": true,
-      "header": "Authorization",
-      "scheme": "bearer"
-    },
-    "format": "openai"
   }
 }

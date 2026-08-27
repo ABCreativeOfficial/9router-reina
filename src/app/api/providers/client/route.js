@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getProviderConnections } from "@/lib/localDb";
 import { backfillCodexEmails } from "@/lib/oauth/providers";
 import { USAGE_APIKEY_PROVIDERS, USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
+import { isNewApiConnection } from "open-sse/services/newapi/definition.js";
 
 const SAFE_FIELDS = [
   "id", "provider", "authType", "name", "email", "displayName",
@@ -18,6 +19,9 @@ const SAFE_PSD_FIELDS = [
   "githubLogin", "githubName", "githubEmail", "githubUserId",
   "username", "firstName", "lastName", "authMethod", "authKind",
   "profileArn",
+  // New API family markers — non-secret deployment metadata the client uses to
+  // label a dynamic provider's quota row.
+  "newApiOrigin", "newApiLabel",
 ];
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -44,6 +48,9 @@ function sanitize(c) {
 }
 
 function isUsageEligible(connection) {
+  // New API connections are family-eligible: their provider id is user-created,
+  // so it can never appear in the static registry-derived lists below.
+  if (isNewApiConnection(connection)) return true;
   return USAGE_SUPPORTED_PROVIDERS.includes(connection.provider) && (
     connection.authType === "oauth" || USAGE_APIKEY_PROVIDERS.includes(connection.provider)
   );
