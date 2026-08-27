@@ -11,13 +11,14 @@ import { resolveQoderModels } from "open-sse/services/qoderModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
-import { gorouterClient } from "open-sse/services/gorouter.js";
-import { tabitokenClient } from "open-sse/services/tabitoken.js";
+import { createNewApiClientForConnection } from "open-sse/services/newapi/resolve.js";
 
-// New API deployments (GoRouter, TabiToken) expose an account-specific catalog
-// behind their management credential, so the resolver is shared and the registry
-// entry only names the client.
-async function resolveNewApiModels(client, connection) {
+// A New API connection carries its deployment's trusted origin, so its
+// account-specific catalog resolves from the connection itself — no provider-id
+// entry and no registry membership required.
+async function resolveNewApiModels(connection) {
+  const client = createNewApiClientForConnection(connection);
+  if (!client) return null;
   const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
   const result = await client.fetchModels(
     connection.accessToken,
@@ -411,8 +412,6 @@ const PROVIDER_MODELS_CONFIG = {
       errorLabel: "Failed to fetch Gemini CLI models"
     })
   },
-  gorouter: { customResolver: (connection) => resolveNewApiModels(gorouterClient, connection) },
-  tabitoken: { customResolver: (connection) => resolveNewApiModels(tabitokenClient, connection) },
   "grok-cli": {
     customResolver: async (connection) => {
       const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
@@ -470,6 +469,21 @@ export async function GET(request, { params }) {
 
     if (!connection) {
       return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+    }
+
+    // New API first: its provider ids live in the openai-compatible namespace, but
+    // the account-specific catalog comes from the management API, not from
+    // `<baseUrl>/models` with the inference key.
+    const newApiModels = await resolveNewApiModels(connection);
+    if (newApiModels) {
+      if (newApiModels.error) {
+        return NextResponse.json({ error: newApiModels.error }, { status: newApiModels.status || 502 });
+      }
+      return NextResponse.json({
+        provider: connection.provider,
+        connectionId: connection.id,
+        models: newApiModels.models,
+      });
     }
 
     if (isOpenAICompatibleProvider(connection.provider)) {

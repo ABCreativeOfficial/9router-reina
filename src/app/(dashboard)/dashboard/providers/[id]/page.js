@@ -5,8 +5,9 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrc, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, GoRouterAuthModal, NewApiManualAuthModal, Toggle, Select, EditConnectionModal, ModelAccessModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, NewApiAuthModal, Toggle, Select, EditConnectionModal, ModelAccessModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
+import { NEW_API_FAMILY } from "open-sse/services/newapi/definition.js";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -48,10 +49,8 @@ export default function ProviderDetailPage() {
   const [showOAuthModal, setShowOAuthModal] = useState(false);
   const [showIFlowCookieModal, setShowIFlowCookieModal] = useState(false);
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
-  const [showGoRouterAuthModal, setShowGoRouterAuthModal] = useState(false);
-  const [goRouterReconnectUserId, setGoRouterReconnectUserId] = useState(null);
-  const [showNewApiManualModal, setShowNewApiManualModal] = useState(false);
-  const [newApiReconnectUserId, setNewApiReconnectUserId] = useState(null);
+  const [showNewApiAuthModal, setShowNewApiAuthModal] = useState(false);
+  const [newApiReconnect, setNewApiReconnect] = useState(null);
   const [addConnectionError, setAddConnectionError] = useState("");
   const [showBulkImportCodex, setShowBulkImportCodex] = useState(false);
   const [showBulkImportGrokCli, setShowBulkImportGrokCli] = useState(false);
@@ -118,14 +117,9 @@ export default function ProviderDetailPage() {
   };
 
   const triggerAddConnection = () => {
-    if (providerId === "gorouter") {
-      setGoRouterReconnectUserId(null);
-      setShowGoRouterAuthModal(true);
-      return;
-    }
-    if (isNewApiManualProvider) {
-      setNewApiReconnectUserId(null);
-      setShowNewApiManualModal(true);
+    if (isNewApiProvider) {
+      setNewApiReconnect(null);
+      setShowNewApiAuthModal(true);
       return;
     }
     if (isOAuth) {
@@ -150,12 +144,20 @@ export default function ProviderDetailPage() {
   const providerInfo = providerNode
     ? {
         id: providerNode.id,
-        name: providerNode.name || (providerNode.type === "anthropic-compatible" ? "Anthropic Compatible" : "OpenAI Compatible"),
-        color: providerNode.type === "anthropic-compatible" ? "#D97757" : "#10A37F",
-        textIcon: providerNode.type === "anthropic-compatible" ? "AC" : "OC",
+        name: providerNode.name
+          || (providerNode.family === NEW_API_FAMILY
+            ? "New API"
+            : providerNode.type === "anthropic-compatible" ? "Anthropic Compatible" : "OpenAI Compatible"),
+        color: providerNode.family === NEW_API_FAMILY
+          ? "#7C3AED"
+          : providerNode.type === "anthropic-compatible" ? "#D97757" : "#10A37F",
+        textIcon: providerNode.family === NEW_API_FAMILY
+          ? "NA"
+          : providerNode.type === "anthropic-compatible" ? "AC" : "OC",
         apiType: providerNode.apiType,
         baseUrl: providerNode.baseUrl,
         type: providerNode.type,
+        family: providerNode.family,
       }
     : (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId] || WEB_COOKIE_PROVIDERS[providerId]);
   const authModes = providerInfo?.authModes || [];
@@ -163,11 +165,11 @@ export default function ProviderDetailPage() {
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
   const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
   const staticModels = getModelsByProviderId(providerId);
-  // New API deployments (GoRouter, TabiToken) serve an account-specific catalog,
+  // A New API provider is a user-created definition, identified by its family
+  // marker — never by a hardcoded provider id. Its catalog is account-specific,
   // so the dashboard reads live models per connection instead of the registry.
-  const isNewApiProvider = providerId === "gorouter" || providerId === "tabitoken";
-  // TabiToken has no browser bridge, so it onboards through the generic manual modal.
-  const isNewApiManualProvider = providerId === "tabitoken";
+  const isNewApiProvider = providerNode?.family === NEW_API_FAMILY;
+  const newApiOrigin = isNewApiProvider ? (providerNode.newApi?.origin || "") : "";
   const perAccountLiveModels = isNewApiProvider || providerId === "cursor";
   const models = perAccountLiveModels && liveModels.length > 0
     ? liveModels
@@ -177,6 +179,11 @@ export default function ProviderDetailPage() {
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
   const isAnthropicCompatible = isAnthropicCompatibleProvider(providerId);
   const isCompatible = isOpenAICompatible || isAnthropicCompatible;
+  // A New API provider shares the openai-compatible id namespace so inference
+  // routing needs no new branch — but its UI is not the plain compat UI: models
+  // come from the management API and connections come from pairing, not a pasted
+  // key. `isPlainCompatible` is the "user-entered endpoint + key" case only.
+  const isPlainCompatible = isCompatible && !isNewApiProvider;
   const hasDualAuthModes = !isCompatible && isOAuth && supportsApiKeyAuth;
   const oauthConnectionLabel =
     providerId === "xai" ? "Grok Build OAuth"
@@ -233,8 +240,13 @@ export default function ProviderDetailPage() {
   });
   const modelAccessCatalog = buildProviderModelCatalog({
     staticModels,
+    // Prefer the selected account's own catalog, but fall back to the provider
+    // union: an inactive account (or one whose fetch failed) has no per-connection
+    // list, and an empty catalog would leave nothing selectable.
     liveModels: isNewApiProvider && selectedConnection?.id
-      ? liveModelsByConnection[selectedConnection.id] || []
+      ? (liveModelsByConnection[selectedConnection.id]?.length
+        ? liveModelsByConnection[selectedConnection.id]
+        : liveModels)
       : liveModels,
     preferLiveModels: perAccountLiveModels,
     kiloFreeModels,
@@ -1069,17 +1081,15 @@ export default function ProviderDetailPage() {
                   setShowModelAccessModal(true);
                 }}
                 onReconnect={
-                  providerId === "gorouter" && conn.providerSpecificData?.userId
+                  isNewApiProvider && conn.providerSpecificData?.userId
                     ? () => {
-                      setGoRouterReconnectUserId(String(conn.providerSpecificData.userId));
-                      setShowGoRouterAuthModal(true);
+                      setNewApiReconnect({
+                        userId: String(conn.providerSpecificData.userId),
+                        connectionId: conn.id,
+                      });
+                      setShowNewApiAuthModal(true);
                     }
-                    : isNewApiManualProvider && conn.providerSpecificData?.userId
-                      ? () => {
-                        setNewApiReconnectUserId(String(conn.providerSpecificData.userId));
-                        setShowNewApiManualModal(true);
-                      }
-                      : undefined
+                    : undefined
                 }
                 onDelete={() => handleDelete(conn.id)}
                 oneByOneStatus={oneByOneResults[conn.id] || null}
@@ -1162,7 +1172,7 @@ export default function ProviderDetailPage() {
   };
 
   const renderModelsSection = () => {
-    if (isCompatible) {
+    if (isPlainCompatible) {
       return (
         <CompatibleModelsSection
           providerStorageAlias={providerStorageAlias}
@@ -1341,6 +1351,9 @@ export default function ProviderDetailPage() {
 
   // Determine icon path: OpenAI Compatible providers use specialized icons
   const getHeaderIconPath = () => {
+    // A New API provider shares the openai-compatible id namespace but is not an
+    // OpenAI endpoint, so it keeps its own "NA" text fallback instead.
+    if (isNewApiProvider) return null;
     if (isOpenAICompatible && providerInfo.apiType) {
       return providerInfo.apiType === "responses" ? "/providers/oai-r.png" : "/providers/oai-cc.png";
     }
@@ -1433,7 +1446,61 @@ export default function ProviderDetailPage() {
         </div>
       )}
 
-      {isCompatible && providerNode && (
+      {isNewApiProvider && providerNode && (
+        <Card>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold">New API Provider Details</h2>
+              <p className="break-all text-sm text-text-muted">
+                {newApiOrigin} · inference {(providerNode.baseUrl || "").replace(/\/$/, "")}/chat/completions
+              </p>
+              <p className="mt-1 text-xs text-text-muted">
+                Model prefix <code>{providerNode.prefix}</code>. The origin is fixed for this provider —
+                delete and re-add it to point at a different deployment, so a stored key is never
+                sent to another host.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
+              <Button
+                size="sm"
+                icon="login"
+                onClick={() => {
+                  setNewApiReconnect(null);
+                  setShowNewApiAuthModal(true);
+                }}
+                className="w-full sm:w-auto"
+              >
+                Add Account
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon="delete"
+                onClick={() => {
+                  setConfirmState({
+                    title: "Delete New API Provider",
+                    message: `Delete "${providerInfo.name}" and all ${connections.length} of its connections?`,
+                    onConfirm: async () => {
+                      setConfirmState(null);
+                      try {
+                        const res = await fetch(`/api/provider-nodes/${providerId}`, { method: "DELETE" });
+                        if (res.ok) router.push("/dashboard/providers");
+                      } catch (error) {
+                        console.log("Error deleting New API provider:", error);
+                      }
+                    },
+                  });
+                }}
+                className="w-full sm:w-auto"
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {isPlainCompatible && providerNode && (
         <Card>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
@@ -1619,10 +1686,12 @@ export default function ProviderDetailPage() {
                     )}
                     <Button
                       size="sm"
-                      icon="add"
+                      icon={isNewApiProvider ? "login" : "add"}
                       onClick={triggerAddConnection}
                     >
-                      {isCompatible ? "Add API Key" : (providerId === "iflow" ? "OAuth" : "Add Connection")}
+                      {isNewApiProvider
+                        ? `Connect ${providerInfo.name}`
+                        : isCompatible ? "Add API Key" : (providerId === "iflow" ? "OAuth" : "Add Connection")}
                     </Button>
                   </>
                 )}
@@ -1660,7 +1729,7 @@ export default function ProviderDetailPage() {
                 </div>
               )}
               {connectionsList}
-              {!isCompatible && (
+              {!isPlainCompatible && (
                 <div className="mt-4 grid grid-cols-1 gap-2 sm:flex">
                   {providerId === "iflow" && (
                     <Button
@@ -1698,28 +1767,14 @@ export default function ProviderDetailPage() {
                       {translate("Bulk Add")}
                     </Button>
                   )}
-                  {providerId === "gorouter" && (
+                  {isNewApiProvider && (
                     <Button
                       size="sm"
                       icon="login"
                       variant="secondary"
                       onClick={() => {
-                        setGoRouterReconnectUserId(null);
-                        setShowGoRouterAuthModal(true);
-                      }}
-                      className="w-full sm:w-auto"
-                    >
-                      Connect GoRouter
-                    </Button>
-                  )}
-                  {isNewApiManualProvider && (
-                    <Button
-                      size="sm"
-                      icon="login"
-                      variant="secondary"
-                      onClick={() => {
-                        setNewApiReconnectUserId(null);
-                        setShowNewApiManualModal(true);
+                        setNewApiReconnect(null);
+                        setShowNewApiAuthModal(true);
                       }}
                       className="w-full sm:w-auto"
                     >
@@ -1783,7 +1838,7 @@ export default function ProviderDetailPage() {
               </select>
             )}
           </div>
-          {!isCompatible && (() => {
+          {!isPlainCompatible && (() => {
             const allIds = [...modelCatalog.displayModels, ...modelCatalog.disabledModels].map((m) => m.id);
             const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
             return (
@@ -1847,33 +1902,21 @@ export default function ProviderDetailPage() {
           onClose={() => setShowIFlowCookieModal(false)}
         />
       )}
-      <GoRouterAuthModal
-        isOpen={showGoRouterAuthModal}
-        expectedUserId={goRouterReconnectUserId}
-        onSuccess={() => {
-          setShowGoRouterAuthModal(false);
-          setGoRouterReconnectUserId(null);
-          fetchConnections();
-        }}
-        onClose={() => {
-          setShowGoRouterAuthModal(false);
-          setGoRouterReconnectUserId(null);
-        }}
-      />
-      <NewApiManualAuthModal
-        isOpen={showNewApiManualModal}
-        provider={providerId}
+      <NewApiAuthModal
+        isOpen={showNewApiAuthModal}
+        providerId={providerId}
         label={providerInfo.name}
-        website={providerInfo.website}
-        expectedUserId={newApiReconnectUserId}
+        origin={newApiOrigin}
+        expectedUserId={newApiReconnect?.userId}
+        connectionId={newApiReconnect?.connectionId}
         onSuccess={() => {
-          setShowNewApiManualModal(false);
-          setNewApiReconnectUserId(null);
+          setShowNewApiAuthModal(false);
+          setNewApiReconnect(null);
           fetchConnections();
         }}
         onClose={() => {
-          setShowNewApiManualModal(false);
-          setNewApiReconnectUserId(null);
+          setShowNewApiAuthModal(false);
+          setNewApiReconnect(null);
         }}
       />
       <AddApiKeyModal
@@ -1909,7 +1952,7 @@ export default function ProviderDetailPage() {
         onSave={handleUpdateModelAccess}
         onClose={() => setShowModelAccessModal(false)}
       />
-      {isCompatible && (
+      {isPlainCompatible && (
         <EditCompatibleNodeModal
           isOpen={showEditNodeModal}
           node={providerNode}
@@ -1918,7 +1961,7 @@ export default function ProviderDetailPage() {
           isAnthropic={isAnthropicCompatible}
         />
       )}
-      {!isCompatible && (
+      {!isPlainCompatible && (
         <AddCustomModelModal
           isOpen={showAddCustomModel}
           providerAlias={providerStorageAlias}

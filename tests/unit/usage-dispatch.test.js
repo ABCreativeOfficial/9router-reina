@@ -16,7 +16,7 @@ const SUPPORTED = [
   "github", "gemini-cli", "antigravity", "claude", "codex", "kiro",
   "qoder", "iflow", "ollama", "glm", "glm-cn",
   "minimax", "minimax-cn", "vercel-ai-gateway", "grok-cli", "kimi",
-  "deepseek", "zed", "gorouter", "tabitoken",
+  "deepseek", "zed",
 ];
 
 describe("usage dispatch", () => {
@@ -36,5 +36,34 @@ describe("usage dispatch", () => {
       expect(res, `${provider} routed`).toBeTypeOf("object");
       expect(res?.message).not.toBe(`Usage API not implemented for ${provider}`);
     }
+  });
+
+  it("a New API connection routes by family, with no provider-id entry", async () => {
+    const { getUsageForProvider } = await load();
+    // A user-created provider id that is in no static list. Eligibility comes from
+    // the connection's own trusted origin.
+    const res = await getUsageForProvider({
+      provider: "openai-compatible-chat-abc123",
+      accessToken: "management-token",
+      providerSpecificData: {
+        userId: "42",
+        newApiOrigin: "https://example.com",
+        newApiLabel: "Example API",
+      },
+    });
+    expect(res).toBeTypeOf("object");
+    expect(res?.message).not.toBe("Usage API not implemented for openai-compatible-chat-abc123");
+  });
+
+  it("a compatible connection without the family marker still falls through", async () => {
+    const { getUsageForProvider } = await load();
+    const res = await getUsageForProvider({
+      provider: "openai-compatible-chat-abc123",
+      apiKey: "k",
+      providerSpecificData: { baseUrl: "https://example.com/v1" },
+    });
+    expect(res).toEqual({
+      message: "Usage API not implemented for openai-compatible-chat-abc123",
+    });
   });
 });

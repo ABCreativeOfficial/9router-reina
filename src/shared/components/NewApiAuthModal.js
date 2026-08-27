@@ -8,35 +8,48 @@ import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
 
 const POLL_INTERVAL_MS = 1000;
-const TERMINAL_STATES = new Set(["success", "needs_token_creation", "error", "expired"]);
+const TERMINAL_STATES = new Set(["success", "error", "expired"]);
 
-const STATUS_TEXT = {
-  pending: "Waiting for GoRouter authentication…",
-  processing: "Completing GoRouter connection…",
-  success: "GoRouter account connected.",
-  needs_token_creation: "No usable GoRouter API token found. Create one in GoRouter, then connect again.",
-  error: "GoRouter pairing failed. Try again.",
+// Label-parameterized rather than a fixed table: a New API provider's name comes
+// from its user-created definition.
+const statusTextFor = (label) => ({
+  pending: `Waiting for ${label} authentication…`,
+  processing: `Completing ${label} connection…`,
+  success: `${label} account connected.`,
+  error: `${label} pairing failed. Try again.`,
   expired: "Pairing expired. Start again.",
-};
+});
 
-const ERROR_TEXT = {
-  wrong_account: "A different GoRouter account is logged in. Log out on gorouter.app, then retry.",
-  management_auth_failed: "GoRouter authentication failed.",
-  needs_token_creation: STATUS_TEXT.needs_token_creation,
+const errorTextFor = (label) => ({
+  wrong_account: `A different ${label} account is logged in. Log out on ${label}, then retry.`,
+  management_auth_failed: `${label} authentication failed.`,
+  provider_mismatch: "The browser authenticated against a different provider.",
+  provider_missing: `This ${label} provider no longer exists.`,
+  router_origin_mismatch: "The pairing was issued for a different 9Router address.",
   connect_failed: "Connection could not be saved.",
-};
+});
 
 /**
- * GoRouter onboarding.
+ * Bridge-first onboarding for any New API provider (custom fork).
  *
- * Primary flow is the Chrome bridge: 9Router mints a short-lived single-use
- * pairing, opens GoRouter login with the secret in the URL fragment, and polls a
- * non-secret status route. The extension does the credential capture inside the
- * GoRouter origin, so no token is pasted here and none is exposed to this page.
+ * 9Router mints a short-lived single-use pairing, opens the provider's login page
+ * with the secret in the URL fragment, and polls a non-secret status route. The
+ * universal 9Router New API Bridge extension captures the management credential
+ * inside the provider's own origin, so no token is pasted here and none is ever
+ * exposed to this page. A usable inference token is chosen or created server-side.
  *
  * The manual management-token form remains as an advanced fallback for recovery.
  */
-export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, onClose }) {
+export default function NewApiAuthModal({
+  isOpen,
+  providerId,
+  label,
+  origin,
+  expectedUserId,
+  connectionId,
+  onSuccess,
+  onClose,
+}) {
   const [pairing, setPairing] = useState(null);
   const [status, setStatus] = useState(null);
   const [starting, setStarting] = useState(false);
@@ -54,9 +67,12 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
 
   const popupRef = useRef(null);
 
+  const statusText = statusTextFor(label);
+  const errorText = errorTextFor(label);
+
   // Re-seed from the open/target pair without an effect (React's recommended
   // pattern), so a reopened modal never shows the previous pairing's state.
-  const sessionKey = `${isOpen}:${expectedUserId || ""}`;
+  const sessionKey = `${isOpen}:${providerId}:${expectedUserId || ""}`;
   const [seenKey, setSeenKey] = useState(sessionKey);
   if (sessionKey !== seenKey) {
     setSeenKey(sessionKey);
@@ -67,7 +83,7 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
     setError("");
     setShowManual(false);
     setManagementToken("");
-    setUserId("");
+    setUserId(expectedUserId || "");
     setName("");
     setAccount(null);
     setTokens([]);
@@ -85,7 +101,7 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
     const tick = async () => {
       try {
         const response = await fetch(
-          `/api/providers/gorouter/pair/status?id=${encodeURIComponent(pairing.pairingId)}`,
+          `/api/new-api/pair/status?id=${encodeURIComponent(pairing.pairingId)}`,
           { cache: "no-store" },
         );
         const payload = await response.json().catch(() => ({}));
@@ -93,7 +109,7 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
         const next = payload?.data?.status;
         if (next) {
           setStatus(next);
-          if (payload.data.errorCode) setError(ERROR_TEXT[payload.data.errorCode] || "");
+          if (payload.data.errorCode) setError(errorTextFor(label)[payload.data.errorCode] || "");
           if (next === "success") {
             // Terminal: the effect's own guard stops it from re-entering, so
             // onSuccess fires exactly once per pairing.
@@ -114,29 +130,33 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [isOpen, pairing, status, onSuccess]);
+  }, [isOpen, pairing, status, label, onSuccess]);
 
   const startPairing = async () => {
     setStarting(true);
     setError("");
     setPopupBlocked(false);
     try {
-      const response = await fetch("/api/providers/gorouter/pair/start", {
+      const response = await fetch("/api/new-api/pair/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expectedUserId: expectedUserId || null }),
+        body: JSON.stringify({
+          providerId,
+          expectedUserId: expectedUserId || null,
+          connectionId: connectionId || null,
+        }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.data?.loginUrl) {
-        setError(payload?.error || "Unable to start GoRouter pairing.");
+        setError(payload?.error || `Unable to start ${label} pairing.`);
         return;
       }
       setPairing(payload.data);
       setStatus("pending");
-      popupRef.current = window.open(payload.data.loginUrl, "gorouter_pair", "width=600,height=760");
+      popupRef.current = window.open(payload.data.loginUrl, "newapi_pair", "width=600,height=760");
       if (!popupRef.current) setPopupBlocked(true);
     } catch {
-      setError("Unable to start GoRouter pairing.");
+      setError(`Unable to start ${label} pairing.`);
     } finally {
       setStarting(false);
     }
@@ -146,28 +166,33 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
     setManualLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/providers/gorouter/bootstrap", {
+      const response = await fetch("/api/new-api/bootstrap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ managementToken, userId, tokenId, name, action }),
+        body: JSON.stringify({ providerId, managementToken, userId, tokenId, name, action }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(data.error || "Unable to connect GoRouter account.");
+        setError(data.error || `Unable to connect the ${label} account.`);
         return;
       }
       if (action === "connect") {
         onSuccess();
         return;
       }
+      // Reconnect is pinned to one account: the server rejects a mismatch, but
+      // flag it here too rather than letting the user pick a wrong token first.
+      if (expectedUserId && String(data.account?.id) !== String(expectedUserId)) {
+        setError(`Wrong ${label} account. Expected account ${expectedUserId}.`);
+        return;
+      }
       setAccount(data.account || null);
       setTokens(data.tokens || []);
       const usable = (data.tokens || []).find((token) => token.status === 1);
       setTokenId(usable ? String(usable.id) : "");
-      setName((current) => current || data.account?.displayName || "GoRouter");
-      if (data.state === "needs_token_creation") setError(STATUS_TEXT.needs_token_creation);
+      setName((current) => current || data.account?.displayName || label);
     } catch {
-      setError("Unable to connect GoRouter account.");
+      setError(`Unable to connect the ${label} account.`);
     } finally {
       setManualLoading(false);
     }
@@ -177,13 +202,19 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
   const canRetry = !waiting && !starting;
 
   return (
-    <Modal isOpen={isOpen} title="Connect GoRouter" onClose={onClose}>
+    <Modal isOpen={isOpen} title={`Connect ${label}`} onClose={onClose}>
       <div className="flex flex-col gap-4">
         <div className="rounded-lg border border-blue-500/20 bg-blue-500/10 p-3 text-xs text-text-muted">
-          <p className="font-medium text-text-main">GoRouter Bridge</p>
+          <p className="font-medium text-text-main">New API Bridge</p>
           <p className="mt-1">
-            Click Connect, then complete the normal GitHub login on gorouter.app. The
-            9Router GoRouter Bridge Chrome extension finishes the setup — no tokens to copy.
+            Click Connect, then complete the normal login on{" "}
+            {origin ? (
+              <a href={origin} target="_blank" rel="noopener noreferrer" className="text-primary underline">
+                {origin.replace(/^https:\/\//, "")}
+              </a>
+            ) : label}
+            . The 9Router New API Bridge extension finishes the setup — no tokens to copy,
+            and an API token is selected or created for you.
           </p>
           {expectedUserId && (
             <p className="mt-1">Reconnecting account {expectedUserId}. Log in with that account.</p>
@@ -195,12 +226,12 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
             <Badge variant={status === "success" ? "success" : TERMINAL_STATES.has(status) ? "error" : "default"}>
               {status.replace(/_/g, " ")}
             </Badge>
-            <span className="text-xs text-text-muted">{STATUS_TEXT[status]}</span>
+            <span className="text-xs text-text-muted">{statusText[status]}</span>
           </div>
         )}
 
         <Button onClick={startPairing} disabled={starting || waiting} fullWidth icon="login">
-          {starting ? "Starting…" : waiting ? "Waiting for GoRouter…" : "Connect GoRouter"}
+          {starting ? "Starting…" : waiting ? `Waiting for ${label}…` : `Connect ${label}`}
         </Button>
 
         {popupBlocked && pairing?.loginUrl && (
@@ -210,42 +241,50 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
             rel="noopener noreferrer"
             className="text-xs text-primary underline"
           >
-            Popup was blocked. Open GoRouter manually.
+            Popup was blocked. Open {label} manually.
           </a>
         )}
 
         {status === "expired" && canRetry && (
-          <p className="text-xs text-text-muted">The pairing timed out. Click Connect GoRouter to start a new one.</p>
+          <p className="text-xs text-text-muted">The pairing timed out. Click Connect to start a new one.</p>
         )}
 
-        {!waiting && (
-          <button
-            type="button"
-            onClick={() => setShowManual((current) => !current)}
-            className="self-start text-xs text-text-muted underline hover:text-primary"
-          >
-            {showManual ? "Hide advanced setup" : "Advanced: enter credentials manually"}
-          </button>
+        {/* A remotely-served 9Router needs the bridge to post back to this origin
+            rather than localhost. Name it, so a silent 5-minute wait is diagnosable. */}
+        {waiting && pairing?.routerOrigin && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/.test(pairing.routerOrigin) && (
+          <p className="text-xs text-text-muted">
+            The extension must post back to <code>{pairing.routerOrigin}</code>. If nothing happens,
+            use Advanced below.
+          </p>
         )}
+
+        <button
+          type="button"
+          onClick={() => setShowManual((current) => !current)}
+          className="self-start text-xs text-text-muted underline hover:text-primary"
+        >
+          {showManual ? "Hide advanced setup" : "Advanced: enter credentials manually"}
+        </button>
 
         {showManual && (
           <div className="flex flex-col gap-3 rounded-lg border border-black/10 p-3 dark:border-white/10">
             <p className="text-xs text-text-muted">
-              Fallback for recovery when the extension is unavailable. Credentials stay server-side after submission.
+              Fallback for recovery when the extension is unavailable. Paste your account id and the
+              token from <code>/api/user/token</code>; both stay server-side after submission.
             </p>
             <Input
-              label="GoRouter User ID"
+              label={`${label} User ID`}
               value={userId}
               onChange={(event) => setUserId(event.target.value)}
               placeholder="Numeric user ID"
-              disabled={!!account}
+              disabled={!!account || !!expectedUserId}
             />
             <Input
               label="Management Token"
               type="password"
               value={managementToken}
               onChange={(event) => setManagementToken(event.target.value)}
-              placeholder="GoRouter user access token"
+              placeholder="User access token"
               disabled={!!account}
             />
 
@@ -261,15 +300,20 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
             ) : (
               <>
                 <div className="rounded-lg bg-sidebar/50 p-3 text-sm">
-                  <p className="font-medium">{account.displayName || `GoRouter ${account.id}`}</p>
+                  <p className="font-medium">
+                    {account.displayName || account.username || `${label} ${account.id}`}
+                  </p>
                   <p className="text-xs text-text-muted">Group: {account.group || "default"}</p>
                 </div>
-                <Input label="Connection Name" value={name} onChange={(event) => setName(event.target.value)} />
+                {/* Reconnect keeps the stored name, so only offer this when creating. */}
+                {!expectedUserId && (
+                  <Input label="Connection Name" value={name} onChange={(event) => setName(event.target.value)} />
+                )}
                 <div className="flex flex-col gap-2">
-                  <p className="text-sm font-medium">Existing API Token</p>
+                  <p className="text-sm font-medium">API Token</p>
                   {tokens.length === 0 ? (
                     <p className="text-xs text-text-muted">
-                      No existing tokens found. Create one in GoRouter, then validate again.
+                      No existing tokens. Connect anyway — one dedicated to 9Router will be created.
                     </p>
                   ) : tokens.map((token) => (
                     <label
@@ -278,7 +322,7 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
                     >
                       <input
                         type="radio"
-                        name="gorouter-token"
+                        name={`${providerId}-token`}
                         value={token.id}
                         checked={tokenId === String(token.id)}
                         onChange={(event) => setTokenId(event.target.value)}
@@ -299,10 +343,10 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
                 <Button
                   variant="secondary"
                   onClick={() => manualRequest("connect")}
-                  disabled={manualLoading || !tokenId}
+                  disabled={manualLoading}
                   fullWidth
                 >
-                  {manualLoading ? "Connecting…" : "Use Selected Token"}
+                  {manualLoading ? "Connecting…" : tokenId ? "Use Selected Token" : "Connect (auto token)"}
                 </Button>
               </>
             )}
@@ -316,9 +360,13 @@ export default function GoRouterAuthModal({ isOpen, expectedUserId, onSuccess, o
   );
 }
 
-GoRouterAuthModal.propTypes = {
+NewApiAuthModal.propTypes = {
   isOpen: PropTypes.bool.isRequired,
+  providerId: PropTypes.string.isRequired,
+  label: PropTypes.string.isRequired,
+  origin: PropTypes.string,
   expectedUserId: PropTypes.string,
+  connectionId: PropTypes.string,
   onSuccess: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,
 };

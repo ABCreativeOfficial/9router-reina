@@ -1008,25 +1008,5 @@
       "preserveCacheControl": true
     },
     "format": "openai"
-  },
-  "gorouter": {
-    "baseUrl": "https://gorouter.app/v1/chat/completions",
-    "validateUrl": "https://gorouter.app/v1/models",
-    "auth": {
-      "combined": true,
-      "header": "Authorization",
-      "scheme": "bearer"
-    },
-    "format": "openai"
-  },
-  "tabitoken": {
-    "baseUrl": "https://tabitoken.com/v1/chat/completions",
-    "validateUrl": "https://tabitoken.com/v1/models",
-    "auth": {
-      "combined": true,
-      "header": "Authorization",
-      "scheme": "bearer"
-    },
-    "format": "openai"
   }
 }

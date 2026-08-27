@@ -235,45 +235,48 @@ describe("dashboard guard local-only access", () => {
     expect(response.body.error).toBe("Local only: CLI token required");
   });
 
-  it("keeps GoRouter credential bootstrap local-only", async () => {
-    const remote = await proxy(request("/api/providers/gorouter/bootstrap", {
-      host: "router.example.com",
-    }));
-    expect(remote.status).toBe(403);
+  it("requires real auth for New API management routes, remotely too", async () => {
+    // 9Router supports remote HTTPS deployment, so these must NOT be loopback-only.
+    // They mint pairing secrets and accept management tokens, so a remote caller
+    // needs a JWT or the CLI token even when login is disabled.
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
 
-    const local = await proxy(request("/api/providers/gorouter/bootstrap", {
-      host: "router.example.com",
-      "x-9r-cli-token": "cli-token",
-    }));
-    expect(local).toBe(mocks.nextResponse);
-  });
-
-  it("keeps New API onboarding routes local-only", async () => {
     for (const pathname of [
-      "/api/providers/gorouter/pair/start",
-      "/api/providers/gorouter/pair/status",
-      "/api/providers/tabitoken/bootstrap",
+      "/api/new-api/providers",
+      "/api/new-api/bootstrap",
+      "/api/new-api/pair/start",
+      "/api/new-api/pair/status",
     ]) {
       const remote = await proxy(request(pathname, { host: "router.example.com" }));
-      expect(remote.status).toBe(403);
+      expect(remote.status, pathname).toBe(401);
 
       const cli = await proxy(request(pathname, {
         host: "router.example.com",
         "x-9r-cli-token": "cli-token",
       }));
-      expect(cli).toBe(mocks.nextResponse);
+      expect(cli, pathname).toBe(mocks.nextResponse);
     }
   });
 
-  it("lets the GoRouter bridge post pair completion without a dashboard session", async () => {
-    // The extension posts from the gorouter.app page context and has no cookie;
+  it("lets the New API bridge post pair completion without a dashboard session", async () => {
+    // The extension posts from the provider's own page context and has no cookie;
     // the route's one-time pairing secret is the authorization, not this gate.
-    const response = await proxy(request("/api/providers/gorouter/pair/complete", {
+    const response = await proxy(request("/api/new-api/pair/complete", {
       host: "localhost:20128",
     }));
 
     expect(response).toBe(mocks.nextResponse);
     expect(mocks.validateApiKey).not.toHaveBeenCalled();
+  });
+
+  it("keeps pair completion public on a remote HTTPS host too", async () => {
+    // A remote deployment's bridge still has no session; the sensitive-path gate
+    // must not swallow the completion route by prefix.
+    const response = await proxy(request("/api/new-api/pair/complete", {
+      host: "router.example.com",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
   });
 
   it("protects connection export and import when login is disabled", async () => {    mocks.getSettings.mockResolvedValue({ requireLogin: false });

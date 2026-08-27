@@ -31,11 +31,11 @@ const PUBLIC_API_PATHS = [
   "/api/auth/saml",
   "/api/version",
   "/api/settings/require-login",
-  // GoRouter Chrome-bridge completion. The extension posts from the gorouter.app
-  // page context and has no dashboard cookie, so the gate cannot be a session
+  // New API browser-bridge completion. The extension posts from the provider's
+  // own page context and has no dashboard cookie, so the gate cannot be a session
   // check. Authorization is the one-time 256-bit pairing secret in the body,
   // which the route verifies against a stored hash (single-use, 5-min TTL).
-  "/api/providers/gorouter/pair/complete",
+  "/api/new-api/pair/complete",
 ];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
@@ -47,6 +47,17 @@ const PUBLIC_PREFIXES = ["/v1", "/v1beta", "/api/v1", "/api/v1beta", "/codex", "
 const SENSITIVE_DASHBOARD_PATHS = [
   "/api/providers/export",
   "/api/providers/import",
+  // New API provider management + pairing control. 9Router may be served over
+  // HTTPS remotely, so these must not be loopback-only — but they mint pairing
+  // secrets and accept management tokens, so a remote caller always needs a
+  // dashboard JWT or the CLI token even when requireLogin=false.
+  // `/api/new-api/pair/complete` is deliberately NOT here: the bridge has no
+  // session, and its authorization is the one-time pairing secret (see
+  // PUBLIC_API_PATHS above). Exact paths, so no prefix swallows it.
+  "/api/new-api/providers",
+  "/api/new-api/bootstrap",
+  "/api/new-api/pair/start",
+  "/api/new-api/pair/status",
 ];
 
 // Always require JWT or local CLI token, even when dashboard login is disabled.
@@ -93,10 +104,10 @@ const LOCAL_ONLY_PATHS = [
   "/api/tunnel/disable",
   "/api/oauth/cursor/auto-import",
   "/api/oauth/kiro/auto-import",
-  "/api/providers/gorouter/bootstrap",
-  "/api/providers/gorouter/pair/start",
-  "/api/providers/gorouter/pair/status",
-  "/api/providers/tabitoken/bootstrap",
+  // New API routes are deliberately NOT here: 9Router supports remote HTTPS
+  // deployment, so its onboarding must work from a non-loopback dashboard. They
+  // are gated by SENSITIVE_DASHBOARD_PATHS instead, which requires real auth for
+  // a remote caller rather than refusing it.
   "/api/auth/reset-password",
   "/api/headroom/start",
   "/api/headroom/stop",

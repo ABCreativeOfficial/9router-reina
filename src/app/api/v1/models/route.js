@@ -14,8 +14,8 @@ import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
 import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
-import { gorouterClient } from "open-sse/services/gorouter.js";
-import { tabitokenClient } from "open-sse/services/tabitoken.js";
+import { createNewApiClientForConnection } from "open-sse/services/newapi/resolve.js";
+import { isNewApiConnection } from "open-sse/services/newapi/definition.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
@@ -25,9 +25,12 @@ import {
   isConnectionEligibleForModel,
 } from "@/sse/services/accountModelPolicy.js";
 
-// New API deployments serve an account-specific catalog behind the management
-// credential, so both share one resolver and the map only names the client.
-async function resolveNewApiLiveModels(client, conn) {
+// A New API connection serves an account-specific catalog behind its management
+// credential. The client is built from the connection's own trusted origin, so no
+// provider id is involved.
+async function resolveNewApiLiveModels(conn) {
+  const client = createNewApiClientForConnection(conn);
+  if (!client) return null;
   const proxy = await resolveConnectionProxyConfig(conn.providerSpecificData || {});
   const result = await client.fetchModels(
     conn.accessToken,
@@ -42,10 +45,6 @@ async function resolveNewApiLiveModels(client, conn) {
   );
   return result.ok && result.models.length ? { models: result.models } : null;
 }
-
-// Providers whose live catalog is per-account: the union is built across every
-// active connection, each filtered by its own enabledModels policy.
-const PER_ACCOUNT_LIVE_PROVIDERS = new Set(["gorouter", "tabitoken"]);
 
 // Per-provider live model resolvers. Each receives a connection record and
 // returns { models: [{ id, name? }, ...] } | null on failure.
@@ -134,8 +133,6 @@ const LIVE_MODEL_RESOLVERS = {
     }, { log: console });
     return result?.models?.length ? { models: result.models } : null;
   },
-  gorouter: (conn) => resolveNewApiLiveModels(gorouterClient, conn),
-  tabitoken: (conn) => resolveNewApiLiveModels(tabitokenClient, conn),
   zed: async (conn) => {
     const result = await resolveZedModels({
       accessToken: conn.accessToken,
@@ -405,6 +402,14 @@ export async function buildModelsList(kindFilter, options = {}) {
       let liveModelKindById = new Map();
       let liveCapabilitiesById = new Map();
 
+      // New API providers are per-account live: the union is built across every
+      // active connection, each filtered by its own enabledModels policy. Detected
+      // by family from the connection, never by provider id.
+      const isNewApiProviderPool = isNewApiConnection(conn);
+      const liveResolver = isNewApiProviderPool
+        ? resolveNewApiLiveModels
+        : LIVE_MODEL_RESOLVERS[providerId];
+
       let rawModelIds = hasExplicitEnabledModels
         ? Array.from(
             new Set(
@@ -415,17 +420,19 @@ export async function buildModelsList(kindFilter, options = {}) {
           )
         : providerModels.map((model) => model.id);
 
-      if (isCompatibleProvider && rawModelIds.length === 0 && !skipDynamicFetch) {
+      // A New API id lives in the openai-compatible namespace, but its catalog
+      // comes from the management API below, so the compat fallback runs *after*
+      // the live resolver rather than before it.
+      if (isCompatibleProvider && !isNewApiProviderPool && rawModelIds.length === 0 && !skipDynamicFetch) {
         rawModelIds = await fetchCompatibleModelIds(conn);
       }
 
       // Config-driven live catalog override (e.g. Kiro returns dynamic
       // -thinking/-agentic variants per account). On failure, fall back to
       // whatever rawModelIds already holds.
-      const liveResolver = LIVE_MODEL_RESOLVERS[providerId];
       if (liveResolver) {
         try {
-          const liveResults = PER_ACCOUNT_LIVE_PROVIDERS.has(providerId)
+          const liveResults = isNewApiProviderPool
             ? await Promise.all(
                 (activeConnectionsByProvider.get(providerId) || [conn]).map(async (candidate) => {
                   const live = await liveResolver(candidate);
@@ -450,6 +457,15 @@ export async function buildModelsList(kindFilter, options = {}) {
         } catch (err) {
           console.log(`Live model fetch failed for ${providerId}: ${err?.message || err}`);
         }
+      }
+
+      // A New API node has no static catalog, so a failed management fetch would
+      // otherwise list nothing at all. `<baseUrl>/models` answers the inference key
+      // (that is what validateInferenceKey probes), so degrade to it rather than
+      // hiding a provider whose routing still works. Per-account policy is
+      // unaffected: `hasExplicitEnabledModels` already short-circuits this.
+      if (isNewApiProviderPool && rawModelIds.length === 0 && !skipDynamicFetch) {
+        rawModelIds = await fetchCompatibleModelIds(conn);
       }
 
       const modelIds = rawModelIds
