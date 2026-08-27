@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getModelAliases: vi.fn(async () => ({})),
   getDisabledModels: vi.fn(async () => ({})),
   fetchGoRouterModels: vi.fn(),
+  fetchTabiTokenModels: vi.fn(),
 }));
 
 vi.mock("@/lib/localDb", () => ({
@@ -23,7 +24,11 @@ vi.mock("@/lib/disabledModelsDb", () => ({
 vi.mock("@/sse/services/tokenRefresh", () => ({ updateProviderCredentials: vi.fn() }));
 
 vi.mock("open-sse/services/gorouter.js", () => ({
-  fetchGoRouterModels: mocks.fetchGoRouterModels,
+  gorouterClient: { fetchModels: mocks.fetchGoRouterModels },
+}));
+
+vi.mock("open-sse/services/tabitoken.js", () => ({
+  tabitokenClient: { fetchModels: mocks.fetchTabiTokenModels },
 }));
 
 vi.mock("@/lib/network/connectionProxy", () => ({
@@ -110,5 +115,21 @@ describe("/v1/models — per-account policy visibility", () => {
     const ids = models.filter((model) => model.owned_by === "gor").map((model) => model.id).sort();
     expect(ids).toEqual(["gor/model-a", "gor/model-b"]);
     expect(mocks.fetchGoRouterModels).toHaveBeenCalledTimes(2);
+  });
+
+  it("applies the same per-account union to the second New API deployment", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "A", provider: "tabitoken", isActive: true, accessToken: "ma", providerSpecificData: { userId: "1", enabledModels: ["model-a"] } },
+      { id: "B", provider: "tabitoken", isActive: true, accessToken: "mb", providerSpecificData: { userId: "2" } },
+    ]);
+    mocks.fetchTabiTokenModels
+      .mockResolvedValueOnce({ ok: true, models: [{ id: "model-a" }, { id: "model-x" }] })
+      // Unrestricted account: its whole catalog stays visible.
+      .mockResolvedValueOnce({ ok: true, models: [{ id: "model-b" }] });
+
+    const models = await buildModelsList(["llm"], { skipDynamicFetch: true });
+    const ids = models.filter((model) => model.owned_by === "tbt").map((model) => model.id).sort();
+    expect(ids).toEqual(["tbt/model-a", "tbt/model-b"]);
+    expect(mocks.fetchTabiTokenModels).toHaveBeenCalledTimes(2);
   });
 });

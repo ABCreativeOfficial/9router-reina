@@ -139,6 +139,7 @@ import p136 from "./bedrock.js";
 import p137 from "./bedrock-xai.js";
 import p138 from "./nous.js";
 import p124 from "./gorouter.js";
+import p125 from "./tabitoken.js";
 
 export default [
   p0,
@@ -279,5 +280,5 @@ export default [
   p137,
   p138,
   p124,
-
+  p125,
 ];
