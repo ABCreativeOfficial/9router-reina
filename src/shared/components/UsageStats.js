@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { FREE_PROVIDERS, AI_PROVIDERS } from "@/shared/constants/providers";
+import { buildProviderTopologyProviders } from "@/shared/utils/providerTopology";
 
 // Keep providers without serviceKinds (default LLM) or with "llm" in serviceKinds
 function isLLMProvider(id) {
@@ -219,34 +220,34 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
 
-  // Fetch connected providers once, deduplicate by provider type
-  // Always include noAuth free providers (e.g. opencode) regardless of connections
+  // Fetch connected providers once. The topology helper collapses every account
+  // under one provider id and resolves its display metadata without ever using a
+  // connection name as the graph label.
+  // Always include noAuth free providers (e.g. opencode) regardless of connections.
   useEffect(() => {
     Promise.all([
       fetch("/api/providers").then((r) => r.ok ? r.json() : null),
       fetch("/api/provider-nodes").then((r) => r.ok ? r.json() : null),
     ])
       .then(([d, nodesData]) => {
-        // Build node name lookup for custom providers
-        const nodeNameMap = {};
-        for (const node of (nodesData?.nodes || [])) {
-          nodeNameMap[node.id] = node.name;
-        }
-        const seen = new Set();
-        const unique = (d?.connections || []).filter((c) => {
-          if (c.isActive === false) return false;
-          if (!isLLMProvider(c.provider)) return false;
-          if (seen.has(c.provider)) return false;
-          seen.add(c.provider);
-          return true;
-        }).map((c) => ({
-          ...c,
-          nodeName: nodeNameMap[c.provider] || null,
-        }));
+        const llmConnections = (d?.connections || []).filter((connection) => (
+          isLLMProvider(connection.provider)
+        ));
+        const providerEntities = buildProviderTopologyProviders(
+          llmConnections,
+          nodesData?.nodes || [],
+        );
+        const seen = new Set(providerEntities.map((provider) => provider.provider));
         const noAuthProviders = Object.values(FREE_PROVIDERS)
-          .filter((p) => p.noAuth && !seen.has(p.id) && isLLMProvider(p.id))
-          .map((p) => ({ provider: p.id, name: p.name }));
-        setProviders([...unique, ...noAuthProviders]);
+          .filter((provider) => provider.noAuth && !seen.has(provider.id) && isLLMProvider(provider.id))
+          .map((provider) => ({
+            provider: provider.id,
+            label: provider.name,
+            textIcon: provider.textIcon || provider.id.slice(0, 2).toUpperCase(),
+            isNewApi: false,
+            connectionCount: 0,
+          }));
+        setProviders([...providerEntities, ...noAuthProviders]);
       })
       .catch(() => {});
   }, []);
