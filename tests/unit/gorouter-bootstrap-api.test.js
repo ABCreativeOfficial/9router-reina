@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   createProviderConnection: vi.fn(),
+  getProviderConnections: vi.fn(),
+  updateProviderConnection: vi.fn(),
   validate: vi.fn(),
   list: vi.fn(),
   retrieve: vi.fn(),
@@ -11,6 +13,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/models", () => ({
   createProviderConnection: mocks.createProviderConnection,
+  getProviderConnections: mocks.getProviderConnections,
+  updateProviderConnection: mocks.updateProviderConnection,
 }));
 
 vi.mock("open-sse/services/gorouter.js", () => ({
@@ -19,6 +23,7 @@ vi.mock("open-sse/services/gorouter.js", () => ({
   retrieveGoRouterTokenKey: mocks.retrieve,
   validateGoRouterInferenceKey: mocks.validateInference,
   fetchGoRouterModels: mocks.models,
+  normalizeGoRouterUserId: (value) => (/^\d+$/.test(String(value ?? "").trim()) ? String(value).trim() : ""),
 }));
 
 import { POST } from "../../src/app/api/providers/gorouter/bootstrap/route.js";
@@ -39,6 +44,8 @@ describe("GoRouter bootstrap API", () => {
     mocks.retrieve.mockResolvedValue({ ok: true, apiKey: "full-inference-key" });
     mocks.validateInference.mockResolvedValue({ ok: true });
     mocks.models.mockResolvedValue({ ok: true, models: [{ id: "model-a", name: "model-a" }] });
+    mocks.getProviderConnections.mockResolvedValue([]);
+    mocks.updateProviderConnection.mockImplementation(async (id, data) => ({ id, provider: "gorouter", ...data }));
     mocks.createProviderConnection.mockResolvedValue({ id: "connection-1", provider: "gorouter", name: "Account", authType: "apikey" });
   });
 
@@ -78,7 +85,9 @@ describe("GoRouter bootstrap API", () => {
   it("rejects inactive selection and never creates tokens automatically", async () => {
     mocks.list.mockResolvedValue({ ok: true, tokens: [{ id: 7, status: 0, maskedKey: "masked" }] });
     const response = await POST(request({ managementToken: "token", userId: "123", tokenId: 7, action: "connect" }));
-    expect(response.status).toBe(400);
+    // 409 + needs_token_creation: creating a token is an explicit user action.
+    expect(response.status).toBe(409);
+    expect((await response.json()).state).toBe("needs_token_creation");
     expect(mocks.retrieve).not.toHaveBeenCalled();
     expect(mocks.createProviderConnection).not.toHaveBeenCalled();
   });
@@ -90,5 +99,64 @@ describe("GoRouter bootstrap API", () => {
     expect(response.status).toBe(401);
     expect(data.error).toMatch(/authentication failed/i);
     expect(JSON.stringify(data)).not.toContain("secret");
+  });
+
+  it("reports needs_token_creation when the account has no usable token", async () => {
+    mocks.list.mockResolvedValue({ ok: true, tokens: [{ id: 7, status: 0, maskedKey: "masked" }] });
+    const response = await POST(request({ managementToken: "management-token", userId: "123", action: "inspect" }));
+    const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(data.state).toBe("needs_token_creation");
+    expect(mocks.retrieve).not.toHaveBeenCalled();
+    expect(mocks.createProviderConnection).not.toHaveBeenCalled();
+  });
+
+  it("reconnect updates the existing account instead of creating a duplicate", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      {
+        id: "existing-1",
+        provider: "gorouter",
+        name: "GoRouter A",
+        providerSpecificData: { userId: "123", enabledModels: ["model-a"] },
+      },
+    ]);
+
+    const response = await POST(request({
+      managementToken: "management-token",
+      userId: "123",
+      tokenId: 7,
+      action: "connect",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.createProviderConnection).not.toHaveBeenCalled();
+    expect(mocks.updateProviderConnection).toHaveBeenCalledWith("existing-1", expect.objectContaining({
+      apiKey: "full-inference-key",
+      accessToken: "management-token",
+      // enabledModels must survive: providerSpecificData is a shallow replace.
+      providerSpecificData: { userId: "123", enabledModels: ["model-a"] },
+    }));
+  });
+
+  it("add-account keeps a different account's connection intact", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "other-1", provider: "gorouter", name: "Account", providerSpecificData: { userId: "999" } },
+    ]);
+
+    const response = await POST(request({
+      managementToken: "management-token",
+      userId: "123",
+      tokenId: 7,
+      name: "Account",
+      action: "connect",
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mocks.updateProviderConnection).not.toHaveBeenCalled();
+    // Name collision would silently overwrite the other account under the repo's
+    // name-only apikey dedup, so the new connection gets a distinct name.
+    const created = mocks.createProviderConnection.mock.calls[0][0];
+    expect(created.providerSpecificData).toEqual({ userId: "123" });
+    expect(created.name).not.toBe("Account");
   });
 });
