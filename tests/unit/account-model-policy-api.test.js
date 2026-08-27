@@ -98,3 +98,68 @@ describe("PUT /api/providers/[id] — enabledModels persistence", () => {
     expect(lastUpdate().providerSpecificData.enabledModels).toEqual(["m", "n"]);
   });
 });
+
+describe("PUT /api/providers/[id] — server-owned providerSpecificData keys", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getProviderConnectionById.mockResolvedValue({
+      id: "conn-1",
+      provider: "codex",
+      authType: "oauth",
+      accessToken: "oauth-access-token",
+      providerSpecificData: { chatgptAccountId: "ws-123" },
+    });
+  });
+
+  it("refuses to let a caller set the New API management target", async () => {
+    // Otherwise any connection could be pointed at an arbitrary host, and the
+    // family-based usage/models hooks would send its accessToken there as a Bearer.
+    await PUT(req({
+      providerSpecificData: {
+        newApiOrigin: "https://attacker.example",
+        newApiLabel: "Evil",
+      },
+    }), { params });
+
+    const psd = lastUpdate().providerSpecificData;
+    expect(psd.newApiOrigin).toBeUndefined();
+    expect(psd.newApiLabel).toBeUndefined();
+    expect(psd.chatgptAccountId).toBe("ws-123");
+  });
+
+  it("refuses the other node-owned keys too", async () => {
+    await PUT(req({
+      providerSpecificData: {
+        baseUrl: "https://attacker.example/v1",
+        prefix: "hijack",
+        apiType: "responses",
+        nodeName: "Evil",
+      },
+    }), { params });
+
+    const psd = lastUpdate().providerSpecificData;
+    for (const key of ["baseUrl", "prefix", "apiType", "nodeName"]) {
+      expect(psd[key], key).toBeUndefined();
+    }
+  });
+
+  it("does not disturb a stored value the server itself wrote", async () => {
+    mocks.getProviderConnectionById.mockResolvedValue({
+      id: "conn-1",
+      provider: "openai-compatible-chat-example",
+      authType: "apikey",
+      providerSpecificData: {
+        userId: "42",
+        newApiOrigin: "https://example.com",
+        baseUrl: "https://example.com/v1",
+      },
+    });
+
+    await PUT(req({ providerSpecificData: { enabledModels: ["m"] } }), { params });
+
+    const psd = lastUpdate().providerSpecificData;
+    expect(psd.newApiOrigin).toBe("https://example.com");
+    expect(psd.baseUrl).toBe("https://example.com/v1");
+    expect(psd.enabledModels).toEqual(["m"]);
+  });
+});
