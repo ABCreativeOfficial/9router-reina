@@ -150,6 +150,7 @@ import p153 from "./nace.js";
 import p154 from "./sensenova-intl.js";
 import p155 from "./synthetic.js";
 import p124g from "./gorouter.js";
+import p125t from "./tabitoken.js";
 export default [
   p0,
   p1,
@@ -300,4 +301,5 @@ export default [
   p154,
   p155,
   p124g,
+  p125t,
 ];
