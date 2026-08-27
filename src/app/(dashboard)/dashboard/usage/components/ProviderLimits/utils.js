@@ -799,7 +799,10 @@ export function parseQuotaData(provider, data) {
         break;
 
       default:
-        // Generic fallback for unknown providers
+        // Generic fallback for unknown providers — including user-created ones
+        // (New API definitions), whose ids are not in any static table. Forward
+        // remainingPercentage when the handler supplied it: a credit-balance row
+        // computes the wrong direction from used/total alone.
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([name, quota]) => {
             normalizedQuotas.push({
@@ -811,6 +814,9 @@ export function parseQuotaData(provider, data) {
               percentageIsUsed: quota.percentageIsUsed === true,
               resetAt: quota.resetAt || null,
               emptyMessage: quota.emptyMessage || null,
+              ...(quota.remainingPercentage !== undefined
+                ? { remainingPercentage: quota.remainingPercentage }
+                : {}),
             });
           });
         }
