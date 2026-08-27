@@ -18,8 +18,7 @@ import { getOpenCodeGoUsage } from "./usage/opencode-go.js";
 import { getGroqUsage } from "./usage/groq.js";
 import { getZedUsage } from "./usage/zed.js";
 import { getXiaomiMimoUsage } from "./usage/xiaomi-mimo.js";
-import { getGoRouterUsage } from "./usage/gorouter.js";
-import { getTabiTokenUsage } from "./usage/tabitoken.js";
+import { getNewApiConnectionUsage } from "./usage/newapi.js";
 import { resolveQoderCredentials } from "./qoderModels.js";
 import { getGlmUsage } from "./usage/glm.js";
 import {
@@ -64,8 +63,6 @@ const USAGE_HANDLERS = {
   groq: (c) => getGroqUsage(c.apiKey, c.proxyOptions),
   zed: (c) => getZedUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
   "xiaomi-mimo": (c) => getXiaomiMimoUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
-  gorouter: (c) => getGoRouterUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
-  tabitoken: (c) => getTabiTokenUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
 };
 
 export async function getUsageForProvider(connection, proxyOptions = null, options = {}) {
@@ -74,6 +71,11 @@ export async function getUsageForProvider(connection, proxyOptions = null, optio
     ...(providerSpecificData || {}),
     ...(projectId ? { projectId } : {}),
   };
+
+  // Family-based first: a New API connection carries its own trusted origin, so
+  // quota works for any deployment without a provider-id entry in the map above.
+  const newApiUsage = getNewApiConnectionUsage(connection, proxyOptions);
+  if (newApiUsage) return await newApiUsage;
 
   const handler = USAGE_HANDLERS[provider];
   if (!handler) return { message: `Usage API not implemented for ${provider}` };

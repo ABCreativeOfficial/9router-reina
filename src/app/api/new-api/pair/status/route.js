@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { readPairingStatus } from "@/lib/gorouter/pairing";
+import { readPairingStatus } from "@/lib/newapi/pairing";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/providers/gorouter/pair/status?id=<pairingId>
+ * GET /api/new-api/pair/status?id=<pairingId>
  *
  * Non-secret pairing state for the modal's poll loop. Never returns the pairing
  * secret, the management token, the inference key, or any upstream response.
@@ -19,7 +19,7 @@ export async function GET(request) {
     );
   } catch {
     return NextResponse.json(
-      { error: "Unable to read GoRouter pairing status." },
+      { error: "Unable to read pairing status." },
       { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }

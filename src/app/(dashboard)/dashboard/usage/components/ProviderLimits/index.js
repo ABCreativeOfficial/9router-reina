@@ -41,6 +41,7 @@ import {
 import Card from "@/shared/components/Card";
 import { ConfirmModal, EditConnectionModal } from "@/shared/components";
 import { USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
+import { isNewApiConnection } from "open-sse/services/newapi/definition.js";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 
 // Maps the stored providerSpecificData.authMethod to a human label for Kiro.
@@ -437,7 +438,10 @@ export default function ProviderLimits() {
           await fetchConnections();
           setShowEditModal(false);
           setSelectedConnection(null);
-          if (USAGE_SUPPORTED_PROVIDERS.includes(provider)) {
+          if (
+            USAGE_SUPPORTED_PROVIDERS.includes(provider)
+            || isNewApiConnection(selectedConnection)
+          ) {
             await fetchQuota(connectionId, provider);
           }
         }
