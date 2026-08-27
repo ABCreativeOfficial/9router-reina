@@ -3,6 +3,10 @@ import { getProviderConnections } from "@/lib/localDb";
 import { backfillCodexEmails } from "@/lib/oauth/providers";
 import { USAGE_APIKEY_PROVIDERS, USAGE_SUPPORTED_PROVIDERS } from "@/shared/constants/providers";
 import { isNewApiConnection } from "open-sse/services/newapi/definition.js";
+import {
+  getProviderDisplayInitials,
+  getProviderDisplayName,
+} from "@/shared/utils/newApiDisplay";
 
 const SAFE_FIELDS = [
   "id", "provider", "authType", "name", "email", "displayName",
@@ -19,9 +23,9 @@ const SAFE_PSD_FIELDS = [
   "githubLogin", "githubName", "githubEmail", "githubUserId",
   "username", "firstName", "lastName", "authMethod", "authKind",
   "profileArn",
-  // New API family markers — non-secret deployment metadata the client uses to
-  // label a dynamic provider's quota row.
-  "newApiOrigin", "newApiLabel",
+  // New API display metadata — all non-secret, copied server-side from the
+  // persisted provider definition.
+  "newApiOrigin", "newApiLabel", "prefix",
 ];
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -45,6 +49,19 @@ function sanitize(c) {
     safe.providerSpecificData = psd;
   }
   return safe;
+}
+
+function buildProviderDisplay(connections) {
+  const display = {};
+  for (const connection of connections) {
+    if (!connection.provider || display[connection.provider]) continue;
+    display[connection.provider] = {
+      label: getProviderDisplayName(connection),
+      initials: getProviderDisplayInitials(connection),
+      isNewApi: isNewApiConnection(connection),
+    };
+  }
+  return display;
 }
 
 function isUsageEligible(connection) {
@@ -95,6 +112,7 @@ export async function GET(request) {
     const allConnections = await getProviderConnections();
     const eligibleConnections = allConnections.filter(isUsageEligible);
     const providerOptions = Array.from(new Set(eligibleConnections.map((conn) => conn.provider))).sort();
+    const providerDisplay = buildProviderDisplay(eligibleConnections);
 
     const providerFilteredConnections = eligibleConnections.filter((conn) => (
       provider === "all" || conn.provider === provider
@@ -116,6 +134,7 @@ export async function GET(request) {
     return NextResponse.json({
       connections: pageConnections,
       providerOptions,
+      providerDisplay,
       pagination: {
         page: currentPage,
         pageSize,
