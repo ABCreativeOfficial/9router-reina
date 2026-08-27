@@ -22,8 +22,7 @@ import { getZedUsage } from "./usage/zed.js";
 import { getXiaomiMimoUsage } from "./usage/xiaomi-mimo.js";
 import { getCursorUsage } from "./usage/cursor.js";
 import { getClinepassUsage } from "./usage/clinepass.js";
-import { getGoRouterUsage } from "./usage/gorouter.js";
-import { getTabiTokenUsage } from "./usage/tabitoken.js";
+import { getNewApiConnectionUsage } from "./usage/newapi.js";
 import { resolveQoderCredentials } from "./qoderModels.js";
 import { getGlmUsage } from "./usage/glm.js";
 import { getCommandCodeUsage } from "./usage/commandcode.js";
@@ -76,8 +75,6 @@ const USAGE_HANDLERS = {
   cursor: (c) => getCursorUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
   // OAuth WorkOS JWT (workos: prefix) or plain ClinePass API key — same usage-limits URL.
   clinepass: (c) => getClinepassUsage(c.accessToken, c.apiKey, c.proxyOptions),
-  gorouter: (c) => getGoRouterUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
-  tabitoken: (c) => getTabiTokenUsage(c.accessToken, c.providerSpecificData, c.proxyOptions),
 };
 
 // Qoder intl/CN share one usage path: PATs must be exchanged to a job token
@@ -94,6 +91,11 @@ export async function getUsageForProvider(connection, proxyOptions = null, optio
     ...(providerSpecificData || {}),
     ...(projectId ? { projectId } : {}),
   };
+
+  // Family-based first: a New API connection carries its own trusted origin, so
+  // quota works for any deployment without a provider-id entry in the map above.
+  const newApiUsage = getNewApiConnectionUsage(connection, proxyOptions);
+  if (newApiUsage) return await newApiUsage;
 
   const handler = USAGE_HANDLERS[provider];
   if (!handler) return { message: `Usage API not implemented for ${provider}` };

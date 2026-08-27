@@ -20,7 +20,7 @@ const SUPPORTED = [
   "github", "gemini-cli", "antigravity", "claude", "codex", "kiro",
   "qoder", "qoder-cn", "iflow", "ollama", "glm", "glm-cn",
   "minimax", "minimax-cn", "minimax-code", "minimax-code-global", "vercel-ai-gateway", "grok-cli", "kimi",
-  "deepseek", "opencode-go", "zed", "commandcode", "synthetic", "gorouter", "tabitoken",
+  "deepseek", "opencode-go", "zed", "commandcode", "synthetic",
 ];
 
 // The first case imports the usage-provider graph, which exceeds the 5s default under
@@ -50,5 +50,35 @@ describe("usage dispatch", { timeout: 20_000 }, () => {
     expect(mcode.getMiniMaxCodeUsage).toHaveBeenCalledWith(
       expect.objectContaining({ provider: "minimax-code", authType: "mcode-lease" }),
     );
+  });
+
+  it("a New API connection routes by family, with no provider-id entry", async () => {
+    const { getUsageForProvider } = await load();
+    // A user-created provider id that is in no static list. Eligibility comes from
+    // the connection's own trusted origin.
+    const res = await getUsageForProvider({
+      provider: "openai-compatible-chat-abc123",
+      accessToken: "management-token",
+      providerSpecificData: {
+        userId: "42",
+        newApiOrigin: "https://example.com",
+        newApiLabel: "Example API",
+      },
+    });
+    expect(res).toBeTypeOf("object");
+    expect(res?.message).not.toBe("Usage API not implemented for openai-compatible-chat-abc123");
+  });
+
+  it("a compatible connection without the family marker still falls through", async () => {
+    const { getUsageForProvider } = await load();
+    const res = await getUsageForProvider({
+      provider: "openai-compatible-chat-abc123",
+      apiKey: "k",
+      providerSpecificData: { baseUrl: "https://example.com/v1" },
+    });
+    expect(res).toEqual({
+      message: "Usage API not implemented for openai-compatible-chat-abc123",
+    });
+>>>>>>> 6dd26e5 (feat(newapi): replace native GoRouter/TabiToken providers with a dynamic New API family)
   });
 });

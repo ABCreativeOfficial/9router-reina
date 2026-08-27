@@ -62,6 +62,11 @@ export async function createProviderNode(data) {
     prefix: data.prefix,
     apiType: data.apiType,
     baseUrl: data.baseUrl,
+    // Provider-family marker + family config (e.g. New API's trusted origin).
+    // Both ride in the JSON `data` column; only whitelisted keys are persisted,
+    // so they must be named here to survive.
+    ...(data.family !== undefined ? { family: data.family } : {}),
+    ...(data.newApi !== undefined ? { newApi: data.newApi } : {}),
     createdAt: now,
     updatedAt: now,
   };

@@ -42,6 +42,20 @@ export async function POST(request) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
     }
 
+    // A prefix is the model-id namespace a request routes through
+    // (`<prefix>/<model>`), so two nodes sharing one make routing pick arbitrarily.
+    // The New API create path already refuses a collision; enforce the reverse
+    // direction here too, or a plain compatible node could silently shadow a New
+    // API provider's alias.
+    const cleanPrefix = prefix.trim();
+    const existingNodes = await getProviderNodes();
+    if (existingNodes.some((node) => node.prefix === cleanPrefix || node.id === cleanPrefix)) {
+      return NextResponse.json(
+        { error: `Prefix "${cleanPrefix}" is already in use.` },
+        { status: 409 },
+      );
+    }
+
     // Determine type
     const nodeType = type || "openai-compatible";
 
@@ -53,7 +67,7 @@ export async function POST(request) {
       const node = await createProviderNode({
         id: `${OPENAI_COMPATIBLE_PREFIX}${apiType}-${generateId()}`,
         type: "openai-compatible",
-        prefix: prefix.trim(),
+        prefix: cleanPrefix,
         apiType,
         baseUrl: (baseUrl || OPENAI_COMPATIBLE_DEFAULTS.baseUrl).trim(),
         name: name.trim(),
@@ -71,7 +85,7 @@ export async function POST(request) {
       const node = await createProviderNode({
         id: `${CUSTOM_EMBEDDING_PREFIX}${generateId()}`,
         type: "custom-embedding",
-        prefix: prefix.trim(),
+        prefix: cleanPrefix,
         baseUrl: sanitizedBaseUrl,
         name: name.trim(),
       });
@@ -89,7 +103,7 @@ export async function POST(request) {
       const node = await createProviderNode({
         id: `${ANTHROPIC_COMPATIBLE_PREFIX}${generateId()}`,
         type: "anthropic-compatible",
-        prefix: prefix.trim(),
+        prefix: cleanPrefix,
         baseUrl: sanitizedBaseUrl,
         name: name.trim(),
       });
