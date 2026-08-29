@@ -25,12 +25,24 @@ describe("New API check-in UI contract", () => {
       '!data.enabled ? "disabled"',
       'data.checkedInToday ? "checked_in"',
       'result.status === "verification_required"',
-      'window.open(verification.loginUrl',
+      'verification?.protocol !== "newapi-checkin-v2"',
+      'window.postMessage({',
+      'source: "9router-newapi-checkin"',
+      'type: "CHECKIN_SESSION"',
+      'checkinSecret: verification.checkinSecret',
+      'window.location.origin',
+      'window.open(verification.launchUrl',
       '/api/new-api/checkin/status?id=',
       'await Promise.all([onQuotaRefresh(), fetchStatus()])',
       'next === "error" || next === "expired"',
       "✓ Checked in today",
     ]) expect(component).toContain(marker);
+  });
+
+  it("keeps the v2 secret in runtime-only router messaging", () => {
+    expect(component).not.toMatch(/localStorage|sessionStorage|indexedDB/);
+    expect(component).not.toContain("newapi-checkin-v1");
+    expect(component).not.toContain("verification.loginUrl");
   });
 
   it("uses the persisted dynamic label indirectly and never an internal-id label", () => {
