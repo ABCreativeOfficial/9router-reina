@@ -12,6 +12,10 @@ const parent = readFileSync(
   join(ROOT, "src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js"),
   "utf8",
 );
+const card = readFileSync(
+  join(ROOT, "src/app/(dashboard)/dashboard/usage/components/ProviderLimits/NewApiQuotaCard.js"),
+  "utf8",
+);
 
 describe("New API referral UI contract", () => {
   it("mounts through the dedicated per-account New API card branch", () => {
@@ -54,24 +58,20 @@ describe("New API referral UI contract", () => {
     expect(component.match(/notify\.error\(/g)).toHaveLength(1);
   });
 
-  it("copies exactly the visible referral code with local feedback", () => {
-    expect(component).toContain("navigator.clipboard.writeText(state.affCode)");
-    expect(component).toContain('aria-label="Copy referral code"');
-    expect(component).toContain('setCopyState("copied")');
-    expect(component).toContain('setCopyState("failed")');
-    expect(component).toContain('setTimeout(() => setCopyState("idle"), 1800)');
-    expect(component).toContain('copyState === "copied" ? "Copied" : state.affCode');
-    expect(component).toContain("focus-visible:outline");
+  it("publishes the referral code upward instead of owning a copy control", () => {
+    expect(component).toContain("onReferralCodeChange");
+    expect(component).toContain('onReferralCodeChange(state.status === "ready" ? state.affCode || "" : "")');
+    expect(component).not.toContain("navigator.clipboard");
+    expect(component).not.toContain('aria-label="Copy referral code"');
+    expect(card).toContain('aria-label="Copy referral code"');
+    expect(card).toContain("copy(referralCode, copyId)");
   });
 
-  it("keeps copy local and independent from Transfer All", () => {
-    const copyStart = component.indexOf("const copyReferralCode");
-    const transferStart = component.indexOf("const transferAll");
-    const copyBlock = component.slice(copyStart, transferStart);
-    expect(copyBlock).not.toContain("notify.success");
-    expect(copyBlock).not.toContain("notify.error");
-    expect(copyBlock).not.toContain("transferAll");
+  it("keeps referral fetch and Transfer All independent of the header copy action", () => {
     expect(component).toContain("onClick={transferAll}");
+    const transferBlock = component.slice(component.indexOf("const transferAll"), component.indexOf("if (state.status === \"unsupported\")"));
+    expect(transferBlock).not.toContain("onReferralCodeChange");
+    expect(transferBlock).toContain("await onQuotaRefresh()");
   });
 
   it("does not invent referral signup URLs or provider-specific behavior", () => {
