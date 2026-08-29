@@ -54,6 +54,26 @@ describe("New API referral UI contract", () => {
     expect(component.match(/notify\.error\(/g)).toHaveLength(1);
   });
 
+  it("copies exactly the visible referral code with local feedback", () => {
+    expect(component).toContain("navigator.clipboard.writeText(state.affCode)");
+    expect(component).toContain('aria-label="Copy referral code"');
+    expect(component).toContain('setCopyState("copied")');
+    expect(component).toContain('setCopyState("failed")');
+    expect(component).toContain('setTimeout(() => setCopyState("idle"), 1800)');
+    expect(component).toContain('copyState === "copied" ? "Copied" : state.affCode');
+    expect(component).toContain("focus-visible:outline");
+  });
+
+  it("keeps copy local and independent from Transfer All", () => {
+    const copyStart = component.indexOf("const copyReferralCode");
+    const transferStart = component.indexOf("const transferAll");
+    const copyBlock = component.slice(copyStart, transferStart);
+    expect(copyBlock).not.toContain("notify.success");
+    expect(copyBlock).not.toContain("notify.error");
+    expect(copyBlock).not.toContain("transferAll");
+    expect(component).toContain("onClick={transferAll}");
+  });
+
   it("does not invent referral signup URLs or provider-specific behavior", () => {
     expect(component).not.toMatch(/sign-up|register|profile/i);
     expect(component).not.toMatch(/gorouter|tabitoken/i);
