@@ -36,6 +36,7 @@ const PUBLIC_API_PATHS = [
   // check. Authorization is the one-time 256-bit pairing secret in the body,
   // which the route verifies against a stored hash (single-use, 5-min TTL).
   "/api/new-api/pair/complete",
+  "/api/new-api/checkin/complete",
 ];
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
@@ -58,6 +59,7 @@ const SENSITIVE_DASHBOARD_PATHS = [
   "/api/new-api/bootstrap",
   "/api/new-api/pair/start",
   "/api/new-api/pair/status",
+  "/api/new-api/checkin/status",
 ];
 
 // Always require JWT or local CLI token, even when dashboard login is disabled.

@@ -26,6 +26,7 @@ export const NEW_API_DEFAULT_PATHS = Object.freeze({
   models: "/api/user/models",
   usage: "/api/data/self",
   tokens: "/api/token/",
+  checkin: "/api/user/checkin",
   inferenceModels: "/v1/models",
 });
 
@@ -58,6 +59,42 @@ function normalizeOrigin(origin) {
 function optionalNumber(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function currentMonth() {
+  return new Date().toISOString().slice(0, 7);
+}
+
+function isAlreadyCheckedIn(message) {
+  return /already|checked[\s_-]*in\s+today|今日.*签|已.*签/i.test(String(message || ""));
+}
+
+function isVerificationRequired(message) {
+  return /turnstile|captcha|verification|人机|验证/i.test(String(message || ""));
+}
+
+function normalizeCheckinRecord(record) {
+  if (!record || typeof record !== "object") return null;
+  const checkinDate = cleanString(record.checkin_date, 32);
+  const quotaAwarded = optionalNumber(record.quota_awarded);
+  if (!checkinDate) return null;
+  return { checkinDate, quotaAwarded };
+}
+
+function normalizeCheckinStatus(data) {
+  if (!data || typeof data !== "object") return null;
+  const stats = data.stats && typeof data.stats === "object" ? data.stats : {};
+  return {
+    supported: true,
+    enabled: data.enabled === true,
+    checkedInToday: stats.checked_in_today === true,
+    minQuota: optionalNumber(data.min_quota),
+    maxQuota: optionalNumber(data.max_quota),
+    checkinCount: optionalNumber(stats.checkin_count),
+    totalCheckins: optionalNumber(stats.total_checkins),
+    totalQuota: optionalNumber(stats.total_quota),
+    records: Array.isArray(stats.records) ? stats.records.map(normalizeCheckinRecord).filter(Boolean) : [],
+  };
 }
 
 function safeTokenMetadata(item) {
@@ -267,6 +304,66 @@ export function createNewApiClient(config) {
     return { ok: true, models };
   }
 
+  async function getCheckinStatus(accessToken, userId, proxyOptions = null) {
+    const result = await requestJson(`${endpoints.checkin}?month=${encodeURIComponent(currentMonth())}`, {
+      accessToken,
+      userId,
+      proxyOptions,
+    });
+    if (!result.ok) {
+      return result.status === 404
+        ? { ok: true, status: result.status, checkin: { supported: false } }
+        : result;
+    }
+    const checkin = normalizeCheckinStatus(result.data);
+    return checkin
+      ? { ok: true, status: result.status, checkin }
+      : { ok: false, status: 502, message: `${label} returned an invalid check-in response.` };
+  }
+
+  async function performCheckin(accessToken, userId, proxyOptions = null) {
+    const token = cleanString(accessToken, MAX_TOKEN_LENGTH);
+    const normalizedUserId = normalizeNewApiUserId(userId);
+    if (!token || !normalizedUserId) {
+      return { ok: false, status: 400, message: `${label} management credentials are required.` };
+    }
+
+    try {
+      const response = await proxyAwareFetch(endpoints.checkin, {
+        method: "POST",
+        headers: managementHeaders(token, normalizedUserId),
+        redirect: "error",
+        signal: AbortSignal.timeout(timeoutMs),
+      }, proxyOptions);
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload?.success === true) {
+        return {
+          ok: true,
+          status: "success",
+          checkedInToday: true,
+          quotaAwarded: optionalNumber(payload.data?.quota_awarded),
+        };
+      }
+
+      const message = cleanString(payload?.message, 500);
+      if (isAlreadyCheckedIn(message)) {
+        return { ok: true, status: "already_checked_in", checkedInToday: true };
+      }
+      if (isVerificationRequired(message)) {
+        return { ok: true, status: "verification_required", checkedInToday: false };
+      }
+      return {
+        ok: false,
+        status: response.status,
+        message: response.status === 401 || response.status === 403
+          ? `${label} management authentication failed.`
+          : `${label} check-in failed.`,
+      };
+    } catch {
+      return { ok: false, status: 502, message: `Unable to reach ${label}.` };
+    }
+  }
+
   /**
    * Create a token dedicated to 9Router.
    *
@@ -332,6 +429,8 @@ export function createNewApiClient(config) {
     retrieveTokenKey,
     validateInferenceKey,
     fetchModels,
+    getCheckinStatus,
+    performCheckin,
     fetchStatus,
   };
 }
