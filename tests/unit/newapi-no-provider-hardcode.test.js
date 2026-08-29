@@ -31,6 +31,7 @@ const NEW_API_SOURCES = [
   "src/app/api/new-api/pair/status/route.js",
   "src/app/api/new-api/pair/complete/route.js",
   "src/app/api/new-api/checkin/status/route.js",
+  "src/app/api/new-api/checkin/credential/route.js",
   "src/app/api/new-api/checkin/complete/route.js",
   "src/app/api/usage/[connectionId]/newapi-checkin/route.js",
   "src/shared/components/NewApiAuthModal.js",
