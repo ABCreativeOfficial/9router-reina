@@ -270,18 +270,21 @@ describe("dashboard guard local-only access", () => {
     expect(mocks.validateApiKey).not.toHaveBeenCalled();
   });
 
-  it("protects the connection check-in action that mints a credential lease", async () => {
+  it("protects sensitive connection-level New API management actions", async () => {
     mocks.getSettings.mockResolvedValue({ requireLogin: false });
-    const pathname = "/api/usage/conn-1/newapi-checkin";
+    for (const pathname of [
+      "/api/usage/conn-1/newapi-checkin",
+      "/api/usage/conn-1/newapi-referral",
+    ]) {
+      const remote = await proxy(request(pathname, { host: "router.example.com" }));
+      expect(remote.status, pathname).toBe(401);
 
-    const remote = await proxy(request(pathname, { host: "router.example.com" }));
-    expect(remote.status).toBe(401);
-
-    const cli = await proxy(request(pathname, {
-      host: "router.example.com",
-      "x-9r-cli-token": "cli-token",
-    }));
-    expect(cli).toBe(mocks.nextResponse);
+      const cli = await proxy(request(pathname, {
+        host: "router.example.com",
+        "x-9r-cli-token": "cli-token",
+      }));
+      expect(cli, pathname).toBe(mocks.nextResponse);
+    }
   });
 
   it("keeps exact bridge routes public on a remote HTTPS host", async () => {
