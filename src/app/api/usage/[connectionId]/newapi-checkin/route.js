@@ -1,6 +1,7 @@
 import { resolveRouterOrigin } from "@/lib/newapi/routerOrigin";
 import {
-  buildCheckinUrl,
+  buildCheckinLaunchUrl,
+  CHECKIN_PROTOCOL,
   createCheckinSession,
 } from "@/lib/newapi/checkin";
 import {
@@ -96,14 +97,14 @@ export async function POST(request, { params }) {
       data: {
         status: "verification_required",
         verification: {
-          protocol: "newapi-checkin-v1",
+          protocol: CHECKIN_PROTOCOL,
           checkinId: session.checkinId,
           checkinSecret: session.checkinSecret,
           expiresAt: session.expiresAt,
           providerOrigin: session.providerOrigin,
           providerLabel: session.providerLabel,
           routerOrigin: session.routerOrigin,
-          loginUrl: buildCheckinUrl(session),
+          launchUrl: buildCheckinLaunchUrl(session),
         },
       },
     });

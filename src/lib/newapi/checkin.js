@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 export const CHECKIN_TTL_MS = 5 * 60 * 1000;
-export const CHECKIN_PROTOCOL = "newapi-checkin-v1";
+export const CHECKIN_PROTOCOL = "newapi-checkin-v2";
 
 export const CHECKIN_STATES = Object.freeze({
   pending: "pending",
@@ -59,6 +59,7 @@ export function createCheckinSession({
     userId,
     createdAt: now,
     expiresAt: now + CHECKIN_TTL_MS,
+    protocol: CHECKIN_PROTOCOL,
     status: CHECKIN_STATES.pending,
     errorCode: null,
   };
@@ -76,12 +77,10 @@ export function createCheckinSession({
   };
 }
 
-export function buildCheckinUrl(session) {
+export function buildCheckinLaunchUrl(session) {
   const fragment = new URLSearchParams({
     "9router_checkin_protocol": CHECKIN_PROTOCOL,
     "9router_checkin_id": session.checkinId,
-    "9router_checkin_secret": session.checkinSecret,
-    "9router_provider_id": session.providerId,
     "9router_provider_label": session.providerLabel,
     "9router_router_origin": session.routerOrigin,
   });
@@ -94,7 +93,8 @@ export function readCheckinStatus(checkinId) {
   sweep();
   const record = sessions.get(id);
   if (!record) return { status: CHECKIN_STATES.expired };
-  if (record.status === CHECKIN_STATES.pending && Date.now() >= record.expiresAt) {
+  if ((record.status === CHECKIN_STATES.pending || record.status === CHECKIN_STATES.processing)
+    && Date.now() >= record.expiresAt) {
     record.status = CHECKIN_STATES.expired;
   }
   return {
@@ -103,7 +103,7 @@ export function readCheckinStatus(checkinId) {
   };
 }
 
-export function claimCheckinSession(checkinId, checkinSecret) {
+function validateCheckinSession(checkinId, checkinSecret, requiredStatus) {
   const id = boundedString(checkinId, MAX_ID_LENGTH);
   const secret = boundedString(checkinSecret, MAX_SECRET_LENGTH);
   if (!id || !secret) return { ok: false, reason: "invalid_checkin" };
@@ -115,19 +115,21 @@ export function claimCheckinSession(checkinId, checkinSecret) {
     record.status = CHECKIN_STATES.expired;
     return { ok: false, reason: "expired" };
   }
-  if (record.status !== CHECKIN_STATES.pending) {
-    return { ok: false, reason: record.status === CHECKIN_STATES.processing ? "in_progress" : "already_used" };
-  }
+  if (record.protocol !== CHECKIN_PROTOCOL) return { ok: false, reason: "unsupported_protocol" };
 
   const supplied = hashSecret(secret);
   if (supplied.length !== record.checkinSecretHash.length
     || !crypto.timingSafeEqual(supplied, record.checkinSecretHash)) {
     return { ok: false, reason: "invalid_checkin" };
   }
+  if (record.status !== requiredStatus) {
+    return { ok: false, reason: "invalid_state" };
+  }
+  return { ok: true, id, record };
+}
 
-  record.status = CHECKIN_STATES.processing;
+function safeClaim(record) {
   return {
-    ok: true,
     connectionId: record.connectionId,
     providerId: record.providerId,
     providerOrigin: record.providerOrigin,
@@ -135,6 +137,39 @@ export function claimCheckinSession(checkinId, checkinSecret) {
     routerOrigin: record.routerOrigin,
     userId: record.userId,
   };
+}
+
+/** Validate a pending v2 lease without consuming it. */
+export function readCheckinSession(checkinId, checkinSecret) {
+  const validation = validateCheckinSession(checkinId, checkinSecret, CHECKIN_STATES.pending);
+  if (!validation.ok) {
+    const record = sessions.get(boundedString(checkinId, MAX_ID_LENGTH));
+    if (validation.reason === "invalid_state" && record?.status === CHECKIN_STATES.processing) {
+      return { ok: false, reason: "credential_already_issued" };
+    }
+    return validation;
+  }
+  return { ok: true, ...safeClaim(validation.record) };
+}
+
+/** Atomically lease the target credential once: pending -> processing. */
+export function claimCheckinCredential(checkinId, checkinSecret) {
+  const validation = validateCheckinSession(checkinId, checkinSecret, CHECKIN_STATES.pending);
+  if (!validation.ok) {
+    const record = sessions.get(boundedString(checkinId, MAX_ID_LENGTH));
+    if (validation.reason === "invalid_state" && record?.status === CHECKIN_STATES.processing) {
+      return { ok: false, reason: "credential_already_issued" };
+    }
+    return validation;
+  }
+  validation.record.status = CHECKIN_STATES.processing;
+  return { ok: true, ...safeClaim(validation.record) };
+}
+
+/** Validate completion without changing state; only processing may complete. */
+export function validateCheckinCompletion(checkinId, checkinSecret) {
+  const validation = validateCheckinSession(checkinId, checkinSecret, CHECKIN_STATES.processing);
+  return validation.ok ? { ok: true, ...safeClaim(validation.record) } : validation;
 }
 
 export function settleCheckinSession(checkinId, status, errorCode = null) {

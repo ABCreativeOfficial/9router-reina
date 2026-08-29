@@ -270,15 +270,40 @@ describe("dashboard guard local-only access", () => {
     expect(mocks.validateApiKey).not.toHaveBeenCalled();
   });
 
-  it("keeps bridge completion routes public on a remote HTTPS host too", async () => {
-    // A remote deployment's bridge still has no session; the sensitive-path gate
-    // must not swallow completion routes by prefix. Their one-time secret authorizes.
+  it("protects the connection check-in action that mints a credential lease", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+    const pathname = "/api/usage/conn-1/newapi-checkin";
+
+    const remote = await proxy(request(pathname, { host: "router.example.com" }));
+    expect(remote.status).toBe(401);
+
+    const cli = await proxy(request(pathname, {
+      host: "router.example.com",
+      "x-9r-cli-token": "cli-token",
+    }));
+    expect(cli).toBe(mocks.nextResponse);
+  });
+
+  it("keeps exact bridge routes public on a remote HTTPS host", async () => {
     for (const pathname of [
       "/api/new-api/pair/complete",
+      "/api/new-api/checkin/credential",
       "/api/new-api/checkin/complete",
     ]) {
       const response = await proxy(request(pathname, { host: "router.example.com" }));
       expect(response, pathname).toBe(mocks.nextResponse);
+    }
+  });
+
+  it("does not make check-in route descendants public", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: true });
+    for (const pathname of [
+      "/api/new-api/checkin/credential/extra",
+      "/api/new-api/checkin/complete/extra",
+      "/api/new-api/checkin/unknown",
+    ]) {
+      const response = await proxy(request(pathname, { host: "router.example.com" }));
+      expect(response.status, pathname).toBe(401);
     }
   });
 
