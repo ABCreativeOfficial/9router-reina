@@ -164,7 +164,7 @@ export default function NewApiCheckin({ connection, onQuotaRefresh, embedded = f
     const today = state.records?.find((record) => record.checkinDate === new Date().toISOString().slice(0, 10));
     const reward = today?.reward ? formatReward(today.reward) : "";
     return embedded ? (
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-black/5 py-3.5 text-[11px] font-medium dark:border-white/5">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t border-black/5 px-1.5 pt-2 text-[11px] font-medium dark:border-white/5">
         <span className="text-emerald-600 dark:text-emerald-400">✓ Checked in today</span>
         {reward && <span className="shrink-0 tabular-nums text-text-primary">+{reward}</span>}
       </div>
