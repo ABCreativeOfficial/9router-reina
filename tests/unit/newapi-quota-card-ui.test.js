@@ -14,28 +14,26 @@ describe("New API quota card presentation", () => {
     expect(parent).toContain("const isNewApi = isNewApiConnection(conn)");
     expect(parent).toContain("if (isNewApi)");
     expect(parent).toContain("<NewApiQuotaCard");
-    expect(parent).toContain("<QuotaTable");
-    expect(parent.indexOf("if (isNewApi)")).toBeLessThan(parent.indexOf("<Card", parent.indexOf("if (isNewApi)")));
     const generic = parent.slice(parent.indexOf("if (isNewApi)"));
     expect(generic).not.toContain("<NewApiCheckin");
     expect(generic).not.toContain("<NewApiReferral");
     expect(generic).toContain("<QuotaTable");
   });
 
-  it("makes label-first account balance and the existing meter semantics the focus", () => {
-    expect(card).toContain("Account balance");
-    expect(card).toContain("Math.max(0, total - used)");
-    expect(card).toContain("getRemainingPercentage(quota)");
-    expect(card).toContain('role="progressbar"');
-    expect(card).toContain("balance.percentage}%");
-    expect(card).toContain("tabular-nums");
-    expect(card.indexOf("Account balance")).toBeLessThan(card.indexOf("formatBalance(balance.amount"));
-    expect(card.indexOf("balance.percentage}%")).toBeLessThan(card.indexOf("formatBalance(balance.amount"));
-    expect(card).not.toContain("quota{");
-    expect(card).not.toContain("<QuotaTable");
+  it("reuses the standard tracker card structure as its visual base", () => {
+    for (const marker of [
+      'padding="none"',
+      'className={`min-w-0 ${isInactive ? "opacity-60" : ""}`}',
+      'className="px-3 py-2 border-b border-black/10 dark:border-white/10"',
+      'className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center overflow-hidden"',
+      'className="text-sm font-semibold text-text-primary capitalize truncate"',
+      'className="px-2 py-1.5"',
+      '<QuotaTable quotas={quotas} compact sortMode="default" />',
+    ]) expect(card).toContain(marker);
+    expect(parent).toContain("quotas={visibleQuotas}");
   });
 
-  it("keeps header actions and wires existing check-in/referral behavior", () => {
+  it("keeps the standard header actions and wires existing behavior", () => {
     for (const marker of [
       'aria-label="Refresh quota"',
       'aria-label="Edit connection"',
@@ -49,18 +47,18 @@ describe("New API quota card presentation", () => {
     ]) expect(card).toContain(marker);
   });
 
-  it("renders a breathable wrap-safe checked-in row with converted reward", () => {
+  it("appends check-in as a compact status row after the quota body", () => {
+    expect(card.indexOf("<QuotaTable")).toBeLessThan(card.indexOf("<NewApiCheckin"));
+    expect(card.indexOf("<NewApiCheckin")).toBeLessThan(card.indexOf("<NewApiReferral"));
     expect(checkin).toContain("embedded ? (");
     expect(checkin).toContain("✓ Checked in today");
     expect(checkin).toContain("+{reward}");
     expect(checkin).toContain("flex-wrap");
-    expect(checkin).toContain("py-3.5");
   });
 
-  it("uses a flat responsive referral footer rather than a nested card", () => {
+  it("uses a flat referral footer rather than a nested card", () => {
     expect(referral).toContain("if (footer)");
     expect(referral).toContain("border-t border-black/10");
-    expect(referral).toContain("sm:grid-cols-3");
     expect(referral).toContain("Referral rewards");
     expect(referral).toContain("Transfer All →");
     expect(referral).toContain('aria-label="Copy referral code"');
@@ -68,7 +66,7 @@ describe("New API quota card presentation", () => {
     expect(referral).toContain("formatAmount(state.totalEarned)");
   });
 
-  it("collapses zero pending into a muted one-line footer", () => {
+  it("collapses zero pending into a compact footer with the code still copyable", () => {
     const zero = referral.slice(referral.indexOf("if (footer && !state.canTransfer)"), referral.indexOf("if (footer) {"));
     expect(zero).toContain("No rewards yet");
     expect(zero).toContain("referralCode");
