@@ -12,7 +12,7 @@ function formatReward(reward) {
   return `${Number(reward.value).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${reward.unit}`;
 }
 
-export default function NewApiCheckin({ connection, onQuotaRefresh }) {
+export default function NewApiCheckin({ connection, onQuotaRefresh, embedded = false }) {
   const notify = useNotificationStore();
   const [state, setState] = useState({ status: "loading" });
   const [session, setSession] = useState(null);
@@ -162,9 +162,15 @@ export default function NewApiCheckin({ connection, onQuotaRefresh }) {
   if (state.status === "loading") return <p className="mt-2 text-[11px] text-text-muted">Daily Check-in: loading…</p>;
   if (state.status === "checked_in") {
     const today = state.records?.find((record) => record.checkinDate === new Date().toISOString().slice(0, 10));
-    return (
+    const reward = today?.reward ? formatReward(today.reward) : "";
+    return embedded ? (
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/5 pt-3 text-[11px] font-medium dark:border-white/5">
+        <span className="text-emerald-600 dark:text-emerald-400">✓ Checked in today</span>
+        {reward && <span className="shrink-0 tabular-nums text-text-primary">+{reward}</span>}
+      </div>
+    ) : (
       <p className="mt-2 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-        ✓ Checked in today{today?.reward ? ` · ${formatReward(today.reward)}` : ""}
+        ✓ Checked in today{reward ? ` · ${reward}` : ""}
       </p>
     );
   }
@@ -198,4 +204,5 @@ export default function NewApiCheckin({ connection, onQuotaRefresh }) {
 NewApiCheckin.propTypes = {
   connection: PropTypes.object.isRequired,
   onQuotaRefresh: PropTypes.func.isRequired,
+  embedded: PropTypes.bool,
 };
