@@ -3,8 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
-import NewApiCheckin from "./NewApiCheckin";
-import NewApiReferral from "./NewApiReferral";
+import NewApiQuotaCard from "./NewApiQuotaCard";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
 import {
@@ -1044,6 +1043,7 @@ export default function ProviderLimits() {
           const isInactive = conn.isActive === false;
           const providerDisplayName = getProviderDisplayName(conn);
           const providerDisplayInitials = getProviderDisplayInitials(conn);
+          const isNewApi = isNewApiConnection(conn);
           const isCodex = conn.provider === "codex";
           const resetCreditCount = getCodexResetCreditCount(quota);
           const isResettingLimit = resettingLimitId === conn.id;
@@ -1051,6 +1051,31 @@ export default function ProviderLimits() {
           const rawQuotas = quota?.quotas || [];
           const visibleQuotas = filterQuotasByVisibility(conn.provider, rawQuotas, quotaVisibility);
           const hiddenQuotaRows = getHiddenQuotaRows(conn.provider, rawQuotas, quotaVisibility);
+
+          if (isNewApi) {
+            return (
+              <NewApiQuotaCard
+                key={conn.id}
+                connection={conn}
+                quota={quota}
+                loading={isLoading}
+                error={error}
+                providerName={providerDisplayName}
+                providerInitials={providerDisplayInitials}
+                connectionLabel={getConnectionLabel(conn)}
+                secondaryLabel={getConnectionSecondaryLabel(conn)}
+                busy={rowBusy}
+                deleting={deletingId === conn.id}
+                onRefresh={() => refreshProvider(conn.id, conn.provider)}
+                onEdit={() => {
+                  setSelectedConnection(conn);
+                  setShowEditModal(true);
+                }}
+                onDelete={() => handleDeleteConnection(conn.id)}
+                onToggleActive={(nextActive) => handleToggleConnectionActive(conn.id, nextActive)}
+              />
+            );
+          }
 
           return (
             <Card
@@ -1283,18 +1308,6 @@ export default function ProviderLimits() {
                   <p className="mt-2 px-1 text-[10px] leading-relaxed text-text-muted">
                     {quota.message}
                   </p>
-                )}
-                {isNewApiConnection(conn) && (
-                  <>
-                    <NewApiCheckin
-                      connection={conn}
-                      onQuotaRefresh={() => refreshProvider(conn.id, conn.provider)}
-                    />
-                    <NewApiReferral
-                      connection={conn}
-                      onQuotaRefresh={() => refreshProvider(conn.id, conn.provider)}
-                    />
-                  </>
                 )}
                 {hiddenQuotaRows.length > 0 && (
                   <div className="mt-2 flex min-w-0 items-center gap-1 border-t border-black/5 pt-2 text-[10px] text-text-muted dark:border-white/5">
