@@ -72,23 +72,21 @@ export default function NewApiQuotaCard({
           </div>
         </div>
 
-        <div className="mt-5">
+        <div className="mt-6">
           {loading ? (
-            <div className="flex justify-center py-5 text-text-muted"><span className="material-symbols-outlined animate-spin text-[28px]">progress_activity</span></div>
+            <div className="flex justify-center py-6 text-text-muted"><span className="material-symbols-outlined animate-spin text-[28px]">progress_activity</span></div>
           ) : error ? (
-            <div className="py-4 text-center"><p className="text-xs text-red-500">{error}</p></div>
+            <div className="py-5 text-center"><p className="text-xs text-red-500">{error}</p></div>
           ) : quota?.message ? (
-            <div className="py-4 text-center"><p className="text-xs text-text-muted">{quota.message}</p></div>
+            <div className="py-5 text-center"><p className="text-xs text-text-muted">{quota.message}</p></div>
           ) : (
             <>
-              <div className="flex items-end justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-2xl font-semibold tracking-tight text-text-primary">{formatBalance(balance.amount, balance.unit)}</p>
-                  <p className="mt-0.5 text-[11px] text-text-muted">Account balance</p>
-                </div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[11px] font-medium text-text-muted">Account balance</p>
                 <p className="shrink-0 text-sm font-semibold tabular-nums text-text-primary">{balance.percentage}%</p>
               </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10" role="progressbar" aria-label="Account balance remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow={balance.percentage}>
+              <p className="mt-1 truncate text-2xl font-semibold tracking-tight tabular-nums text-text-primary">{formatBalance(balance.amount, balance.unit)}</p>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10" role="progressbar" aria-label="Account balance remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow={balance.percentage}>
                 <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(100, Math.max(0, balance.percentage))}%` }} />
               </div>
             </>
