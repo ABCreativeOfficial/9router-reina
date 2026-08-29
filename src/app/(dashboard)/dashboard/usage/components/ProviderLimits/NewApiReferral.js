@@ -9,7 +9,7 @@ function formatAmount(amount) {
   return `${Number(amount.value).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${amount.unit}`;
 }
 
-export default function NewApiReferral({ connection, onQuotaRefresh }) {
+export default function NewApiReferral({ connection, onQuotaRefresh, footer = false }) {
   const notify = useNotificationStore();
   const [state, setState] = useState({ status: "loading" });
   const transferInFlight = useRef(false);
@@ -65,13 +65,50 @@ export default function NewApiReferral({ connection, onQuotaRefresh }) {
 
   if (state.status === "unsupported") return null;
   if (state.status === "loading") {
-    return <p className="mt-2 text-[11px] text-text-muted">Referral Rewards: loading…</p>;
+    return footer
+      ? <div className="border-t border-black/10 px-3 py-3 text-[11px] text-text-muted dark:border-white/10">Referral · loading…</div>
+      : <p className="mt-2 text-[11px] text-text-muted">Referral Rewards: loading…</p>;
   }
   if (state.status === "error") {
-    return (
+    return footer ? (
+      <div className="flex items-center justify-between gap-3 border-t border-black/10 px-3 py-3 text-[11px] dark:border-white/10">
+        <span className="truncate text-red-500">Referral unavailable</span>
+        <button type="button" onClick={fetchReferral} className="shrink-0 font-medium text-primary underline">Retry</button>
+      </div>
+    ) : (
       <button type="button" onClick={fetchReferral} className="mt-2 text-[11px] text-red-500 underline">
         {state.error} Retry
       </button>
+    );
+  }
+
+  if (footer && !state.canTransfer) {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-black/10 px-3 py-3 text-[11px] dark:border-white/10">
+        <span className="font-medium text-text-primary">Referral</span>
+        <span className="text-text-muted">No rewards yet</span>
+        {state.affCode && <span className="ml-auto text-[10px] text-text-muted">Code {state.affCode}</span>}
+      </div>
+    );
+  }
+
+  if (footer) {
+    return (
+      <div className="border-t border-black/10 px-3 py-3 dark:border-white/10">
+        <p className="text-[11px] font-medium text-text-primary">Referral</p>
+        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-[10px] sm:grid-cols-3">
+          <div><p className="text-text-muted">Pending</p><p className="text-sm font-semibold text-text-primary">{formatAmount(state.pending)}</p></div>
+          <div><p className="text-text-muted">Earned</p><p className="text-sm font-semibold text-text-primary">{formatAmount(state.totalEarned)}</p></div>
+          <div><p className="text-text-muted">Invites</p><p className="text-sm font-semibold text-text-primary">{state.invites ?? 0}</p></div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          {state.affCode ? <span className="text-[10px] text-text-muted">Code {state.affCode}</span> : <span />}
+          <button type="button" onClick={transferAll} disabled={state.transferring} className="min-h-8 rounded-md px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50">
+            {state.transferring ? "Transferring…" : "Transfer All →"}
+          </button>
+        </div>
+        {state.error && <p className="mt-1 text-[10px] text-red-500">{state.error}</p>}
+      </div>
     );
   }
 
@@ -86,12 +123,7 @@ export default function NewApiReferral({ connection, onQuotaRefresh }) {
         <div><p className="text-text-muted">Total Earned</p><p className="font-medium text-text-primary">{formatAmount(state.totalEarned)}</p></div>
         <div><p className="text-text-muted">Invites</p><p className="font-medium text-text-primary">{state.invites ?? 0}</p></div>
       </div>
-      <button
-        type="button"
-        onClick={transferAll}
-        disabled={!state.canTransfer || state.transferring}
-        className="mt-2 w-full rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
-      >
+      <button type="button" onClick={transferAll} disabled={!state.canTransfer || state.transferring} className="mt-2 w-full rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50">
         {state.transferring ? "Transferring…" : state.canTransfer ? "Transfer All to Balance" : "Nothing to transfer"}
       </button>
       {state.error && <p className="mt-1 text-[10px] text-red-500">{state.error}</p>}
@@ -102,4 +134,5 @@ export default function NewApiReferral({ connection, onQuotaRefresh }) {
 NewApiReferral.propTypes = {
   connection: PropTypes.object.isRequired,
   onQuotaRefresh: PropTypes.func.isRequired,
+  footer: PropTypes.bool,
 };
