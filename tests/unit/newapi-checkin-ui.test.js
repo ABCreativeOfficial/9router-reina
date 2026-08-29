@@ -19,7 +19,7 @@ describe("New API check-in UI contract", () => {
     expect(providerLimits).toContain("<NewApiCheckin");
   });
 
-  it("covers supported, checked-in, fast-path and verification states", () => {
+  it("covers push completion, polling fallback and fast-path states", () => {
     for (const marker of [
       '!data.supported ? "unsupported"',
       '!data.enabled ? "disabled"',
@@ -32,11 +32,42 @@ describe("New API check-in UI contract", () => {
       'checkinSecret: verification.checkinSecret',
       'window.location.origin',
       'window.open(verification.launchUrl',
+      'window.addEventListener("message", handleCompletion)',
+      'data?.type !== "CHECKIN_COMPLETED"',
+      'data?.checkinId !== session.checkinId',
+      'event.source !== window',
+      'event.origin !== window.location.origin',
+      'void confirmInteractiveSuccess(session.checkinId)',
       '/api/new-api/checkin/status?id=',
-      'await Promise.all([onQuotaRefresh(), fetchStatus()])',
+      'if (await confirmInteractiveSuccess(session.checkinId)) return',
       'next === "error" || next === "expired"',
       "✓ Checked in today",
     ]) expect(component).toContain(marker);
+  });
+
+  it("dedupes one interactive claim while allowing later claim ids", () => {
+    expect(component).toContain("const completedToastIds = useRef(new Set())");
+    expect(component).toContain("const completionPromises = useRef(new Map())");
+    expect(component).toContain("completionPromises.current.get(checkinId)");
+    expect(component).toContain("completedToastIds.current.has(checkinId)");
+    expect(component).toContain("completedToastIds.current.add(checkinId)");
+    expect(component).toContain("completionPromises.current.delete(checkinId)");
+  });
+
+  it("authoritatively confirms before immediate quota refresh and one toast", () => {
+    const confirmStart = component.indexOf("const authoritative = await fetchStatus()");
+    const confirmed = component.indexOf('authoritative.checkedInToday !== true');
+    const quotaRefresh = component.indexOf("await onQuotaRefresh()", confirmed);
+    const toast = component.indexOf('notify.success("Provider confirmed today\'s check-in."', quotaRefresh);
+    expect(confirmStart).toBeGreaterThan(-1);
+    expect(confirmed).toBeGreaterThan(confirmStart);
+    expect(quotaRefresh).toBeGreaterThan(confirmed);
+    expect(toast).toBeGreaterThan(quotaRefresh);
+  });
+
+  it("preserves a separate single fast-path success toast", () => {
+    expect(component).toContain('if (result.status === "success")');
+    expect(component).toContain('notify.success(reward ? `Reward added: ${reward}`');
   });
 
   it("keeps the v2 secret in runtime-only router messaging", () => {
