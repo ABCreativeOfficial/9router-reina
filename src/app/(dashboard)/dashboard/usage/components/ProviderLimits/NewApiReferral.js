@@ -9,12 +9,10 @@ function formatAmount(amount) {
   return `${Number(amount.value).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${amount.unit}`;
 }
 
-export default function NewApiReferral({ connection, onQuotaRefresh, footer = false }) {
+export default function NewApiReferral({ connection, onQuotaRefresh, footer = false, onReferralCodeChange = null }) {
   const notify = useNotificationStore();
   const [state, setState] = useState({ status: "loading" });
-  const [copyState, setCopyState] = useState("idle");
   const transferInFlight = useRef(false);
-  const copyResetTimer = useRef(null);
 
   const fetchReferral = useCallback(async () => {
     try {
@@ -37,47 +35,12 @@ export default function NewApiReferral({ connection, onQuotaRefresh, footer = fa
     return () => clearTimeout(timer);
   }, [fetchReferral]);
 
-  useEffect(() => () => {
-    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
-  }, []);
-
-  const copyReferralCode = async () => {
-    if (!state.affCode) return;
-    try {
-      if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(state.affCode);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = state.affCode;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        const copied = document.execCommand("copy");
-        document.body.removeChild(textarea);
-        if (!copied) throw new Error("Copy failed");
-      }
-      setCopyState("copied");
-    } catch {
-      setCopyState("failed");
-    }
-    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
-    copyResetTimer.current = setTimeout(() => setCopyState("idle"), 1800);
-  };
-
-  const referralCode = state.affCode ? (
-    <button
-      type="button"
-      onClick={copyReferralCode}
-      aria-label="Copy referral code"
-      className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 font-mono text-[11px] text-text-muted transition-colors hover:bg-black/5 hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 dark:hover:bg-white/5"
-    >
-      <span className="max-w-32 truncate">{copyState === "copied" ? "Copied" : state.affCode}</span>
-      <span className="material-symbols-outlined text-[15px]" aria-hidden="true">
-        {copyState === "copied" ? "check" : copyState === "failed" ? "error" : "content_copy"}
-      </span>
-    </button>
-  ) : null;
+  // The copy action lives in the card header, so publish the code upward
+  // instead of rendering a second control inside this section.
+  useEffect(() => {
+    if (!onReferralCodeChange) return;
+    onReferralCodeChange(state.status === "ready" ? state.affCode || "" : "");
+  }, [onReferralCodeChange, state.affCode, state.status]);
 
   const transferAll = async () => {
     if (transferInFlight.current) return;
@@ -133,8 +96,6 @@ export default function NewApiReferral({ connection, onQuotaRefresh, footer = fa
           <span className="text-[11px] font-medium text-text-primary">Referral rewards</span>
           <span className="text-[10px] text-text-muted">No rewards yet</span>
         </div>
-        {referralCode && <div className="mt-1 flex items-center">{referralCode}</div>}
-        {copyState === "failed" && <p className="mt-1 text-[10px] text-red-500">Copy failed. Try again.</p>}
       </div>
     );
   }
@@ -148,13 +109,11 @@ export default function NewApiReferral({ connection, onQuotaRefresh, footer = fa
           <div><p className="text-text-muted">Earned</p><p className="font-medium tabular-nums text-text-primary">{formatAmount(state.totalEarned)}</p></div>
           <div><p className="text-text-muted">Invites</p><p className="font-medium tabular-nums text-text-primary">{state.invites ?? 0}</p></div>
         </div>
-        <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
-          {referralCode || <span />}
+        <div className="mt-1.5 flex justify-end">
           <button type="button" onClick={transferAll} disabled={state.transferring} className="flex h-7 shrink-0 items-center rounded-md border border-primary/30 bg-primary/5 px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 disabled:opacity-50">
             {state.transferring ? "Transferring…" : "Transfer All →"}
           </button>
         </div>
-        {copyState === "failed" && <p className="mt-1 text-[10px] text-red-500">Copy failed. Try again.</p>}
         {state.error && <p className="mt-1 text-[10px] text-red-500">{state.error}</p>}
       </div>
     );
@@ -183,4 +142,5 @@ NewApiReferral.propTypes = {
   connection: PropTypes.object.isRequired,
   onQuotaRefresh: PropTypes.func.isRequired,
   footer: PropTypes.bool,
+  onReferralCodeChange: PropTypes.func,
 };
