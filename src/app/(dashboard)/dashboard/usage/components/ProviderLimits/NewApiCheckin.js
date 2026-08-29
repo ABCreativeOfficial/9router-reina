@@ -5,7 +5,7 @@ import PropTypes from "prop-types";
 import { useNotificationStore } from "@/store/notificationStore";
 
 const POLL_INTERVAL_MS = 1000;
-const TERMINAL_STATES = new Set(["success", "error", "expired"]);
+const TERMINAL_STATES = new Set(["checked_in", "success", "error", "expired"]);
 
 function formatReward(reward) {
   if (!reward || !Number.isFinite(Number(reward.value))) return "";
@@ -17,6 +17,8 @@ export default function NewApiCheckin({ connection, onQuotaRefresh }) {
   const [state, setState] = useState({ status: "loading" });
   const [session, setSession] = useState(null);
   const popupRef = useRef(null);
+  const completedToastIds = useRef(new Set());
+  const completionPromises = useRef(new Map());
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -24,17 +26,41 @@ export default function NewApiCheckin({ connection, onQuotaRefresh }) {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Unable to read check-in status.");
       const data = payload.data || {};
-      setState({
+      const next = {
         ...data,
         status: !data.supported ? "unsupported"
           : !data.enabled ? "disabled"
             : data.checkedInToday ? "checked_in"
               : "available",
-      });
+      };
+      setState(next);
+      return next;
     } catch (error) {
-      setState({ status: "error", error: error.message });
+      const next = { status: "error", error: error.message };
+      setState(next);
+      return next;
     }
   }, [connection.id]);
+
+  const confirmInteractiveSuccess = useCallback((checkinId) => {
+    const existing = completionPromises.current.get(checkinId);
+    if (existing) return existing;
+
+    const confirmation = (async () => {
+      const authoritative = await fetchStatus();
+      if (authoritative.status !== "checked_in" || authoritative.checkedInToday !== true) return false;
+      await onQuotaRefresh();
+      try { popupRef.current?.close(); } catch { /* popup may be gone */ }
+      if (!completedToastIds.current.has(checkinId)) {
+        completedToastIds.current.add(checkinId);
+        notify.success("Provider confirmed today's check-in.", "Check-in successful");
+      }
+      return true;
+    })().finally(() => completionPromises.current.delete(checkinId));
+
+    completionPromises.current.set(checkinId, confirmation);
+    return confirmation;
+  }, [fetchStatus, notify, onQuotaRefresh]);
 
   useEffect(() => {
     const timer = setTimeout(fetchStatus, 0);
@@ -42,7 +68,25 @@ export default function NewApiCheckin({ connection, onQuotaRefresh }) {
   }, [fetchStatus]);
 
   useEffect(() => {
-    if (!session?.checkinId || TERMINAL_STATES.has(state.status)) return;
+    if (!session?.checkinId) return;
+
+    const handleCompletion = (event) => {
+      const data = event.data;
+      if (event.source !== window
+        || event.origin !== window.location.origin
+        || data?.source !== "9router-newapi-checkin"
+        || data?.protocol !== "newapi-checkin-v2"
+        || data?.type !== "CHECKIN_COMPLETED"
+        || data?.checkinId !== session.checkinId) return;
+      void confirmInteractiveSuccess(session.checkinId);
+    };
+
+    window.addEventListener("message", handleCompletion);
+    return () => window.removeEventListener("message", handleCompletion);
+  }, [confirmInteractiveSuccess, session]);
+
+  useEffect(() => {
+    if (!session?.checkinId || TERMINAL_STATES.has(state.status) || completedToastIds.current.has(session.checkinId)) return;
     let cancelled = false;
     let timer;
     const tick = async () => {
@@ -54,10 +98,7 @@ export default function NewApiCheckin({ connection, onQuotaRefresh }) {
         const next = payload?.data?.status;
         if (!cancelled && next) {
           if (next === "success") {
-            try { popupRef.current?.close(); } catch { /* popup may be gone */ }
-            await Promise.all([onQuotaRefresh(), fetchStatus()]);
-            notify.success("Provider confirmed today's check-in.", "Check-in successful");
-            return;
+            if (await confirmInteractiveSuccess(session.checkinId)) return;
           }
           if (next === "error" || next === "expired") {
             setState({ status: next, error: next === "expired" ? "Verification expired. Retry check-in." : "Verification failed. Retry check-in." });
@@ -74,7 +115,7 @@ export default function NewApiCheckin({ connection, onQuotaRefresh }) {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [fetchStatus, notify, onQuotaRefresh, session, state.status]);
+  }, [confirmInteractiveSuccess, session, state.status]);
 
   const checkin = async () => {
     setState((current) => ({ ...current, status: "loading" }));
