@@ -31,13 +31,15 @@ const PUBLIC_API_PATHS = [
   "/api/auth/saml",
   "/api/version",
   "/api/settings/require-login",
-  // New API browser-bridge completion. The extension posts from the provider's
-  // own page context and has no dashboard cookie, so the gate cannot be a session
-  // check. Authorization is the one-time 256-bit pairing secret in the body,
-  // which the route verifies against a stored hash (single-use, 5-min TTL).
-  "/api/new-api/pair/complete",
-  "/api/new-api/checkin/complete",
 ];
+
+// Exact public bridge routes. Never prefix-match: credential leasing must not
+// make another `/api/new-api/checkin/*` route public by accident.
+const PUBLIC_BRIDGE_PATHS = new Set([
+  "/api/new-api/pair/complete",
+  "/api/new-api/checkin/credential",
+  "/api/new-api/checkin/complete",
+]);
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
 // Keep root-level rewrites here too: middleware runs before Next.js rewrites.
@@ -52,9 +54,9 @@ const SENSITIVE_DASHBOARD_PATHS = [
   // HTTPS remotely, so these must not be loopback-only — but they mint pairing
   // secrets and accept management tokens, so a remote caller always needs a
   // dashboard JWT or the CLI token even when requireLogin=false.
-  // `/api/new-api/pair/complete` is deliberately NOT here: the bridge has no
-  // session, and its authorization is the one-time pairing secret (see
-  // PUBLIC_API_PATHS above). Exact paths, so no prefix swallows it.
+  // Exact bridge routes are deliberately NOT here: the extension has no
+  // dashboard session, and one-time hashed secrets authorize those requests.
+  // PUBLIC_BRIDGE_PATHS matches exact paths, so no child route becomes public.
   "/api/new-api/providers",
   "/api/new-api/bootstrap",
   "/api/new-api/pair/start",
@@ -217,7 +219,14 @@ async function isAuthenticated(request) {
 
 function isPublicApi(pathname) {
   if (isPublicLlmApi(pathname)) return true;
+  if (PUBLIC_BRIDGE_PATHS.has(pathname)) return true;
   return PUBLIC_API_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+function isSensitiveDashboardPath(pathname) {
+  if (SENSITIVE_DASHBOARD_PATHS.some((p) => pathname.startsWith(p))) return true;
+  // This action mints a v2 secret that can lease one stored management PAT.
+  return /^\/api\/usage\/[^/]+\/newapi-checkin$/.test(pathname);
 }
 
 export const __test__ = {
@@ -240,7 +249,7 @@ export async function proxy(request) {
 
   // Credential import/export: permit local browser use in no-login mode, but
   // never let a remote request bypass auth merely because requireLogin=false.
-  if (SENSITIVE_DASHBOARD_PATHS.some((p) => pathname.startsWith(p))) {
+  if (isSensitiveDashboardPath(pathname)) {
     if (
       await hasValidCliToken(request) ||
       await hasValidToken(request) ||
