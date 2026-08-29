@@ -12,7 +12,9 @@ function formatAmount(amount) {
 export default function NewApiReferral({ connection, onQuotaRefresh, footer = false }) {
   const notify = useNotificationStore();
   const [state, setState] = useState({ status: "loading" });
+  const [copyState, setCopyState] = useState("idle");
   const transferInFlight = useRef(false);
+  const copyResetTimer = useRef(null);
 
   const fetchReferral = useCallback(async () => {
     try {
@@ -34,6 +36,48 @@ export default function NewApiReferral({ connection, onQuotaRefresh, footer = fa
     const timer = setTimeout(fetchReferral, 0);
     return () => clearTimeout(timer);
   }, [fetchReferral]);
+
+  useEffect(() => () => {
+    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+  }, []);
+
+  const copyReferralCode = async () => {
+    if (!state.affCode) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(state.affCode);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = state.affCode;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        document.body.removeChild(textarea);
+        if (!copied) throw new Error("Copy failed");
+      }
+      setCopyState("copied");
+    } catch {
+      setCopyState("failed");
+    }
+    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+    copyResetTimer.current = setTimeout(() => setCopyState("idle"), 1800);
+  };
+
+  const referralCode = state.affCode ? (
+    <button
+      type="button"
+      onClick={copyReferralCode}
+      aria-label="Copy referral code"
+      className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 font-mono text-[11px] text-text-muted transition-colors hover:bg-black/5 hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 dark:hover:bg-white/5"
+    >
+      <span className="max-w-32 truncate">{copyState === "copied" ? "Copied" : state.affCode}</span>
+      <span className="material-symbols-outlined text-[15px]" aria-hidden="true">
+        {copyState === "copied" ? "check" : copyState === "failed" ? "error" : "content_copy"}
+      </span>
+    </button>
+  ) : null;
 
   const transferAll = async () => {
     if (transferInFlight.current) return;
@@ -84,29 +128,33 @@ export default function NewApiReferral({ connection, onQuotaRefresh, footer = fa
 
   if (footer && !state.canTransfer) {
     return (
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-black/10 px-3 py-3 text-[11px] dark:border-white/10">
-        <span className="font-medium text-text-primary">Referral</span>
-        <span className="text-text-muted">No rewards yet</span>
-        {state.affCode && <span className="ml-auto text-[10px] text-text-muted">Code {state.affCode}</span>}
+      <div className="border-t border-black/10 px-3 py-4 dark:border-white/10">
+        <p className="text-[11px] font-medium text-text-primary">Referral rewards</p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[11px] text-text-muted">No rewards yet</span>
+          {referralCode}
+        </div>
+        {copyState === "failed" && <p className="mt-1 text-[10px] text-red-500">Copy failed. Try again.</p>}
       </div>
     );
   }
 
   if (footer) {
     return (
-      <div className="border-t border-black/10 px-3 py-3 dark:border-white/10">
-        <p className="text-[11px] font-medium text-text-primary">Referral</p>
-        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-[10px] sm:grid-cols-3">
-          <div><p className="text-text-muted">Pending</p><p className="text-sm font-semibold text-text-primary">{formatAmount(state.pending)}</p></div>
-          <div><p className="text-text-muted">Earned</p><p className="text-sm font-semibold text-text-primary">{formatAmount(state.totalEarned)}</p></div>
-          <div><p className="text-text-muted">Invites</p><p className="text-sm font-semibold text-text-primary">{state.invites ?? 0}</p></div>
+      <div className="border-t border-black/10 px-3 py-4 dark:border-white/10">
+        <p className="text-[11px] font-medium text-text-primary">Referral rewards</p>
+        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-[10px] sm:grid-cols-3">
+          <div><p className="text-text-muted">Pending</p><p className="mt-0.5 text-sm font-semibold tabular-nums text-text-primary">{formatAmount(state.pending)}</p></div>
+          <div><p className="text-text-muted">Earned</p><p className="mt-0.5 text-sm font-semibold tabular-nums text-text-primary">{formatAmount(state.totalEarned)}</p></div>
+          <div><p className="text-text-muted">Invites</p><p className="mt-0.5 text-sm font-semibold tabular-nums text-text-primary">{state.invites ?? 0}</p></div>
         </div>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-          {state.affCode ? <span className="text-[10px] text-text-muted">Code {state.affCode}</span> : <span />}
-          <button type="button" onClick={transferAll} disabled={state.transferring} className="min-h-8 rounded-md px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          {referralCode || <span />}
+          <button type="button" onClick={transferAll} disabled={state.transferring} className="min-h-8 rounded-md border border-primary/25 bg-primary/5 px-3 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 disabled:opacity-50">
             {state.transferring ? "Transferring…" : "Transfer All →"}
           </button>
         </div>
+        {copyState === "failed" && <p className="mt-1 text-[10px] text-red-500">Copy failed. Try again.</p>}
         {state.error && <p className="mt-1 text-[10px] text-red-500">{state.error}</p>}
       </div>
     );
