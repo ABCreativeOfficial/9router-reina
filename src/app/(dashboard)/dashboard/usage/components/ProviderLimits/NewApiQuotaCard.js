@@ -1,10 +1,12 @@
 "use client";
 
 import PropTypes from "prop-types";
+import { useCallback, useState } from "react";
 import Card from "@/shared/components/Card";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
+import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import QuotaTable from "./QuotaTable";
 import NewApiCheckin from "./NewApiCheckin";
 import NewApiReferral from "./NewApiReferral";
@@ -35,6 +37,10 @@ export default function NewApiQuotaCard({
   onToggleActive,
 }) {
   const isInactive = connection.isActive === false;
+  const { copied, copy } = useCopyToClipboard();
+  const [referralCode, setReferralCode] = useState("");
+  const handleReferralCodeChange = useCallback((code) => setReferralCode(code), []);
+  const copyId = `newapi-referral-${connection.id}`;
 
   return (
     <Card padding="none" className={`min-w-0 ${isInactive ? "opacity-60" : ""}`}>
@@ -63,6 +69,20 @@ export default function NewApiQuotaCard({
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
+            {referralCode && (
+              <Tooltip text={copied === copyId ? "Copied" : "Copy referral code"}>
+                <button
+                  type="button"
+                  onClick={() => copy(referralCode, copyId)}
+                  aria-label="Copy referral code"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-text-muted hover:text-primary transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    {copied === copyId ? "check" : "content_copy"}
+                  </span>
+                </button>
+              </Tooltip>
+            )}
             <Tooltip text="Refresh quota">
               <button
                 type="button"
@@ -131,7 +151,12 @@ export default function NewApiQuotaCard({
         <NewApiCheckin connection={connection} onQuotaRefresh={onRefresh} embedded />
       </div>
 
-      <NewApiReferral connection={connection} onQuotaRefresh={onRefresh} footer />
+      <NewApiReferral
+        connection={connection}
+        onQuotaRefresh={onRefresh}
+        footer
+        onReferralCodeChange={handleReferralCodeChange}
+      />
     </Card>
   );
 }
