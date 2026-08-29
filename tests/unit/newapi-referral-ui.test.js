@@ -14,10 +14,11 @@ const parent = readFileSync(
 );
 
 describe("New API referral UI contract", () => {
-  it("mounts a per-account card only inside the New API family branch", () => {
-    expect(parent).toContain("isNewApiConnection(conn) &&");
-    expect(parent).toContain("<NewApiReferral");
-    expect(parent).toContain("connection={conn}");
+  it("mounts through the dedicated per-account New API card branch", () => {
+    expect(parent).toContain("const isNewApi = isNewApiConnection(conn)");
+    expect(parent).toContain("if (isNewApi)");
+    expect(parent).toContain("<NewApiQuotaCard");
+    expect(component).toContain("footer = false");
   });
 
   it("renders live referral metrics and transfer-all states", () => {
