@@ -205,6 +205,86 @@ describe("New API model discovery", () => {
   });
 });
 
+describe("New API daily check-in", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("normalizes a successful status response", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: {
+        enabled: true,
+        min_quota: 2500000,
+        max_quota: 5000000,
+        stats: {
+          checked_in_today: false,
+          checkin_count: 5,
+          total_checkins: 5,
+          total_quota: 17657431,
+          records: [{ checkin_date: "2026-08-28", quota_awarded: 3035199 }],
+        },
+      },
+    }));
+
+    const result = await client().getCheckinStatus(TOKEN, USER_ID);
+    expect(result).toMatchObject({
+      ok: true,
+      checkin: {
+        supported: true,
+        enabled: true,
+        checkedInToday: false,
+        minQuota: 2500000,
+        maxQuota: 5000000,
+        checkinCount: 5,
+        records: [{ checkinDate: "2026-08-28", quotaAwarded: 3035199 }],
+      },
+    });
+    const [url, options] = proxyAwareFetch.mock.calls[0];
+    expect(url).toMatch(`${ORIGIN}/api/user/checkin?month=`);
+    expect(options.headers.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(options.headers["New-Api-User"]).toBe(USER_ID);
+  });
+
+  it("keeps enabled false supported and treats only 404 as unsupported", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(jsonResponse({ success: true, data: { enabled: false, stats: {} } }))
+      .mockResolvedValueOnce(jsonResponse({ success: false }, 404))
+      .mockResolvedValueOnce(jsonResponse({ success: false }, 401));
+
+    expect((await client().getCheckinStatus(TOKEN, USER_ID)).checkin)
+      .toMatchObject({ supported: true, enabled: false });
+    expect((await client().getCheckinStatus(TOKEN, USER_ID)).checkin)
+      .toEqual({ supported: false });
+    const auth = await client().getCheckinStatus(TOKEN, USER_ID);
+    expect(auth).toMatchObject({ ok: false, status: 401 });
+  });
+
+  it("normalizes success, already checked in and Turnstile verification", async () => {
+    proxyAwareFetch
+      .mockResolvedValueOnce(jsonResponse({ success: true, data: { quota_awarded: 3203479 } }))
+      .mockResolvedValueOnce(jsonResponse({ success: false, message: "Already checked in today" }))
+      .mockResolvedValueOnce(jsonResponse({ success: false, message: "Turnstile verification required" }));
+
+    expect(await client().performCheckin(TOKEN, USER_ID)).toMatchObject({
+      ok: true,
+      status: "success",
+      checkedInToday: true,
+      quotaAwarded: 3203479,
+    });
+    expect(await client().performCheckin(TOKEN, USER_ID)).toMatchObject({
+      ok: true,
+      status: "already_checked_in",
+      checkedInToday: true,
+    });
+    expect(await client().performCheckin(TOKEN, USER_ID)).toMatchObject({
+      ok: true,
+      status: "verification_required",
+      checkedInToday: false,
+    });
+    expect(proxyAwareFetch.mock.calls[0][0]).toBe(`${ORIGIN}/api/user/checkin`);
+    expect(proxyAwareFetch.mock.calls[0][1].method).toBe("POST");
+  });
+});
+
 describe("New API status and quota conversion", () => {
   beforeEach(() => vi.clearAllMocks());
 
