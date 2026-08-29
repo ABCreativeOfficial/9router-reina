@@ -246,6 +246,7 @@ describe("dashboard guard local-only access", () => {
       "/api/new-api/bootstrap",
       "/api/new-api/pair/start",
       "/api/new-api/pair/status",
+      "/api/new-api/checkin/status",
     ]) {
       const remote = await proxy(request(pathname, { host: "router.example.com" }));
       expect(remote.status, pathname).toBe(401);
@@ -269,14 +270,16 @@ describe("dashboard guard local-only access", () => {
     expect(mocks.validateApiKey).not.toHaveBeenCalled();
   });
 
-  it("keeps pair completion public on a remote HTTPS host too", async () => {
+  it("keeps bridge completion routes public on a remote HTTPS host too", async () => {
     // A remote deployment's bridge still has no session; the sensitive-path gate
-    // must not swallow the completion route by prefix.
-    const response = await proxy(request("/api/new-api/pair/complete", {
-      host: "router.example.com",
-    }));
-
-    expect(response).toBe(mocks.nextResponse);
+    // must not swallow completion routes by prefix. Their one-time secret authorizes.
+    for (const pathname of [
+      "/api/new-api/pair/complete",
+      "/api/new-api/checkin/complete",
+    ]) {
+      const response = await proxy(request(pathname, { host: "router.example.com" }));
+      expect(response, pathname).toBe(mocks.nextResponse);
+    }
   });
 
   it("protects connection export and import when login is disabled", async () => {    mocks.getSettings.mockResolvedValue({ requireLogin: false });
