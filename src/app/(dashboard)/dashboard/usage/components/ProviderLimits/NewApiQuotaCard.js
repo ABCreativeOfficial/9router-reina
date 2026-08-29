@@ -5,29 +5,22 @@ import Card from "@/shared/components/Card";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
+import QuotaTable from "./QuotaTable";
 import NewApiCheckin from "./NewApiCheckin";
 import NewApiReferral from "./NewApiReferral";
-import { getRemainingPercentage } from "./utils";
 
-function readBalance(quota) {
-  if (!quota) return { amount: null, unit: "", percentage: 0 };
-  const total = Number(quota.total);
-  const used = Number(quota.used);
-  const amount = Number.isFinite(total) && Number.isFinite(used) ? Math.max(0, total - used) : null;
-  const unit = String(quota.name || "").match(/\(([^)]+)\)\s*$/)?.[1] || "";
-  return { amount, unit, percentage: getRemainingPercentage(quota) };
-}
-
-function formatBalance(amount, unit) {
-  if (!Number.isFinite(amount)) return "Unavailable";
-  const value = amount.toLocaleString(undefined, { maximumFractionDigits: 4 });
-  if (unit === "USD") return `$${value}`;
-  return unit ? `${value} ${unit}` : value;
-}
-
+/**
+ * Quota Tracker card for a runtime New API account.
+ *
+ * Deliberately mirrors the standard tracker card in `ProviderLimits/index.js`:
+ * same header block, same action row, same compact QuotaTable body and spacing.
+ * The only addition is the New API footer (check-in status, referral rewards),
+ * so a New API account reads as the normal card plus one extra section.
+ */
 export default function NewApiQuotaCard({
   connection,
   quota,
+  quotas,
   loading,
   error,
   providerName,
@@ -41,57 +34,99 @@ export default function NewApiQuotaCard({
   onDelete,
   onToggleActive,
 }) {
-  const inactive = connection.isActive === false;
-  const balance = readBalance(quota?.quotas?.[0]);
+  const isInactive = connection.isActive === false;
 
   return (
-    <Card padding="none" className={`min-w-0 overflow-hidden ${inactive ? "opacity-60" : ""}`}>
-      <div className="px-3 py-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <ProviderIcon
-              alt={providerName}
-              size={32}
-              className="size-8 rounded-md object-contain"
-              fallbackText={providerInitials}
-            />
+    <Card padding="none" className={`min-w-0 ${isInactive ? "opacity-60" : ""}`}>
+      <div className="px-3 py-2 border-b border-black/10 dark:border-white/10">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center overflow-hidden">
+              <ProviderIcon
+                alt={providerName}
+                size={32}
+                className="object-contain"
+                fallbackText={providerInitials}
+              />
+            </div>
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold text-text-primary">{providerName}</h3>
-              {connectionLabel && <p className="truncate text-xs text-text-muted">{connectionLabel}</p>}
-              {secondaryLabel && <p className="truncate text-[11px] text-text-muted/80">{secondaryLabel}</p>}
+              <h3 className="text-sm font-semibold text-text-primary capitalize truncate">
+                {providerName}
+              </h3>
+              {connectionLabel ? (
+                <p className="text-xs text-text-muted truncate">{connectionLabel}</p>
+              ) : null}
+              {secondaryLabel ? (
+                <p className="text-[11px] text-text-muted/80 truncate">{secondaryLabel}</p>
+              ) : null}
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-0.5">
-            <Tooltip text="Refresh quota"><button type="button" onClick={onRefresh} disabled={loading || busy} aria-label="Refresh quota" className="flex size-8 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-black/5 hover:text-primary disabled:opacity-50 dark:hover:bg-white/5"><span className={`material-symbols-outlined text-[18px] ${loading ? "animate-spin" : ""}`}>refresh</span></button></Tooltip>
-            <Tooltip text="Edit connection"><button type="button" onClick={onEdit} disabled={busy} aria-label="Edit connection" className="flex size-8 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-black/5 hover:text-primary disabled:opacity-50 dark:hover:bg-white/5"><span className="material-symbols-outlined text-[18px]">edit</span></button></Tooltip>
-            <Tooltip text="Delete connection"><button type="button" onClick={onDelete} disabled={busy} aria-label="Delete connection" className="flex size-8 items-center justify-center rounded-lg text-red-500 transition-colors hover:bg-red-500/10 disabled:opacity-50"><span className={`material-symbols-outlined text-[18px] ${deleting ? "animate-pulse" : ""}`}>delete</span></button></Tooltip>
-            <div className="inline-flex items-center pl-0.5" title={inactive ? "Enable connection" : "Disable connection"}>
-              <Toggle size="sm" checked={!inactive} disabled={busy} onChange={onToggleActive} />
+          <div className="flex items-center gap-1 shrink-0">
+            <Tooltip text="Refresh quota">
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={loading || busy}
+                aria-label="Refresh quota"
+                className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-[18px] text-text-muted ${loading ? "animate-spin" : ""}`}>
+                  refresh
+                </span>
+              </button>
+            </Tooltip>
+            <Tooltip text="Edit connection">
+              <button
+                type="button"
+                onClick={onEdit}
+                disabled={busy}
+                aria-label="Edit connection"
+                className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-black/5 dark:hover:bg-white/5 text-text-muted hover:text-primary transition-colors disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[18px]">edit</span>
+              </button>
+            </Tooltip>
+            <Tooltip text="Delete connection">
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={busy}
+                aria-label="Delete connection"
+                className="flex h-8 w-8 items-center justify-center rounded-lg hover:bg-red-500/10 text-red-500 transition-colors disabled:opacity-50"
+              >
+                <span className={`material-symbols-outlined text-[18px] ${deleting ? "animate-pulse" : ""}`}>
+                  delete
+                </span>
+              </button>
+            </Tooltip>
+            <div
+              className="inline-flex items-center pl-0.5"
+              title={isInactive ? "Enable connection" : "Disable connection"}
+            >
+              <Toggle size="sm" checked={!isInactive} disabled={busy} onChange={onToggleActive} />
             </div>
           </div>
         </div>
+      </div>
 
-        <div className="mt-6">
-          {loading ? (
-            <div className="flex justify-center py-6 text-text-muted"><span className="material-symbols-outlined animate-spin text-[28px]">progress_activity</span></div>
-          ) : error ? (
-            <div className="py-5 text-center"><p className="text-xs text-red-500">{error}</p></div>
-          ) : quota?.message ? (
-            <div className="py-5 text-center"><p className="text-xs text-text-muted">{quota.message}</p></div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-[11px] font-medium text-text-muted">Account balance</p>
-                <p className="shrink-0 text-sm font-semibold tabular-nums text-text-primary">{balance.percentage}%</p>
-              </div>
-              <p className="mt-1 truncate text-2xl font-semibold tracking-tight tabular-nums text-text-primary">{formatBalance(balance.amount, balance.unit)}</p>
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10" role="progressbar" aria-label="Account balance remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow={balance.percentage}>
-                <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${Math.min(100, Math.max(0, balance.percentage))}%` }} />
-              </div>
-            </>
-          )}
-        </div>
+      <div className="px-2 py-1.5">
+        {loading ? (
+          <div className="text-center py-5 text-text-muted">
+            <span className="material-symbols-outlined text-[28px] animate-spin">progress_activity</span>
+          </div>
+        ) : error ? (
+          <div className="text-center py-5">
+            <span className="material-symbols-outlined text-[28px] text-red-500">error</span>
+            <p className="mt-1.5 text-xs text-text-muted">{error}</p>
+          </div>
+        ) : quota?.message ? (
+          <div className="text-center py-5">
+            <p className="text-xs text-text-muted">{quota.message}</p>
+          </div>
+        ) : (
+          <QuotaTable quotas={quotas} compact sortMode="default" />
+        )}
 
         <NewApiCheckin connection={connection} onQuotaRefresh={onRefresh} embedded />
       </div>
@@ -104,6 +139,7 @@ export default function NewApiQuotaCard({
 NewApiQuotaCard.propTypes = {
   connection: PropTypes.object.isRequired,
   quota: PropTypes.object,
+  quotas: PropTypes.array,
   loading: PropTypes.bool,
   error: PropTypes.string,
   providerName: PropTypes.string.isRequired,
