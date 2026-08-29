@@ -50,6 +50,7 @@ vi.mock("@/lib/localDb", () => ({ getSettings: mocks.getSettings }));
 
 const checkinRoute = await import("../../src/app/api/usage/[connectionId]/newapi-checkin/route.js");
 const statusRoute = await import("../../src/app/api/new-api/checkin/status/route.js");
+const credentialRoute = await import("../../src/app/api/new-api/checkin/credential/route.js");
 const completeRoute = await import("../../src/app/api/new-api/checkin/complete/route.js");
 const {
   BRIDGE_VERSION,
@@ -78,13 +79,15 @@ async function startVerification() {
   return (await response.json()).data.verification;
 }
 
-function completeRequest(verification, overrides = {}) {
-  return new Request("https://router.example.com/api/new-api/checkin/complete", {
+const EXTENSION_ORIGIN = `chrome-extension://${"a".repeat(32)}`;
+
+function bridgeRequest(path, verification, overrides = {}, origin = EXTENSION_ORIGIN) {
+  return new Request(`https://router.example.com/api/new-api/checkin/${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-9Router-Bridge": BRIDGE_VERSION,
-      origin: ORIGIN,
+      origin,
       host: "router.example.com",
       "x-forwarded-proto": "https",
     },
@@ -95,6 +98,18 @@ function completeRequest(verification, overrides = {}) {
       ...overrides,
     }),
   });
+}
+
+function credentialRequest(verification, overrides = {}, origin = EXTENSION_ORIGIN) {
+  return bridgeRequest("credential", verification, overrides, origin);
+}
+
+function completeRequest(verification, overrides = {}, origin = EXTENSION_ORIGIN) {
+  return bridgeRequest("complete", verification, overrides, origin);
+}
+
+async function leaseCredential(verification, overrides = {}, origin = EXTENSION_ORIGIN) {
+  return credentialRoute.POST(credentialRequest(verification, overrides, origin));
 }
 
 beforeEach(() => {
@@ -161,24 +176,118 @@ describe("New API connection check-in route", () => {
     expect(already.data).toMatchObject({ status: "already_checked_in", checkedInToday: true });
   });
 
-  it("creates a hashed, short-lived newapi-checkin-v1 session from persisted state", async () => {
+  it("creates a hashed v2 session with a non-secret provider launch URL", async () => {
     const verification = await startVerification();
+    expect(verification.protocol).toBe("newapi-checkin-v2");
     expect(verification.protocol).toBe(CHECKIN_PROTOCOL);
     expect(verification.providerOrigin).toBe(ORIGIN);
     expect(verification.providerLabel).toBe("Example API");
-    expect(verification.loginUrl).toContain(`9router_checkin_protocol=${CHECKIN_PROTOCOL}`);
-    expect(verification.loginUrl).toContain("#");
-    expect(verification.loginUrl).not.toContain("?");
+    expect(verification.launchUrl).toContain(`9router_checkin_protocol=${CHECKIN_PROTOCOL}`);
+    expect(verification.launchUrl).toContain(`9router_checkin_id=${verification.checkinId}`);
+    expect(verification.launchUrl).toContain("9router_provider_label=Example+API");
+    expect(verification.launchUrl).toContain("9router_router_origin=");
+    expect(verification.launchUrl).toContain("#");
+    expect(verification.launchUrl).not.toContain("?");
+    expect(verification.launchUrl).not.toContain(verification.checkinSecret);
+    expect(verification.launchUrl).not.toContain(USER_ID);
+    expect(verification.launchUrl).not.toContain(connection.accessToken);
     expect(verification.checkinSecret.length).toBeGreaterThanOrEqual(43);
     expect(verification.expiresAt - Date.now()).toBeLessThanOrEqual(CHECKIN_TTL_MS);
 
     const stored = __getCheckinSessionForTest(verification.checkinId);
+    expect(stored).toMatchObject({
+      protocol: "newapi-checkin-v2",
+      connectionId: CONNECTION_ID,
+      providerId: PROVIDER_ID,
+      providerOrigin: ORIGIN,
+      routerOrigin: "https://router.example.com",
+      userId: USER_ID,
+      status: "pending",
+    });
     expect(stored.checkinSecretHash).toBeInstanceOf(Buffer);
     expect(JSON.stringify(stored)).not.toContain(verification.checkinSecret);
   });
 });
 
-describe("newapi-checkin-v1 completion", () => {
+describe("newapi-checkin-v2 credential lease", () => {
+  it("answers preflight only for a strict Chrome extension origin", async () => {
+    const allowed = credentialRoute.OPTIONS(new Request(
+      "https://router.example.com/api/new-api/checkin/credential",
+      { method: "OPTIONS", headers: { origin: EXTENSION_ORIGIN } },
+    ));
+    expect(allowed.status).toBe(204);
+    expect(allowed.headers.get("access-control-allow-origin")).toBe(EXTENSION_ORIGIN);
+    expect(allowed.headers.get("vary")).toBe("Origin");
+
+    const provider = credentialRoute.OPTIONS(new Request(
+      "https://router.example.com/api/new-api/checkin/credential",
+      { method: "OPTIONS", headers: { origin: ORIGIN } },
+    ));
+    expect(provider.status).toBe(403);
+    expect(provider.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("returns only the target PAT identity once, with no-store", async () => {
+    const verification = await startVerification();
+    const response = await leaseCredential(verification);
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({
+      success: true,
+      data: {
+        providerOrigin: ORIGIN,
+        userId: USER_ID,
+        managementToken: connection.accessToken,
+      },
+    });
+    expect(JSON.stringify(payload)).not.toContain("inference");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("pragma")).toBe("no-cache");
+    expect(__getCheckinSessionForTest(verification.checkinId).status).toBe("processing");
+
+    const duplicate = await leaseCredential(verification);
+    expect(duplicate.status).toBe(409);
+    expect(await duplicate.text()).not.toContain(connection.accessToken);
+  });
+
+  it("rejects wrong secret, provider web origin and provider retargeting", async () => {
+    let verification = await startVerification();
+    expect((await leaseCredential(verification, { checkinSecret: "forged" })).status).toBe(403);
+
+    verification = await startVerification();
+    expect((await leaseCredential(verification, {}, ORIGIN)).status).toBe(403);
+
+    verification = await startVerification();
+    expect((await leaseCredential(verification, { providerOrigin: "https://evil.example" })).status).toBe(403);
+    expect(__getCheckinSessionForTest(verification.checkinId).status).toBe("pending");
+  });
+
+  it("re-resolves authoritative connection identity before consuming the lease", async () => {
+    const verification = await startVerification();
+    mocks.getConnection.mockResolvedValueOnce({
+      ...connection,
+      providerSpecificData: { ...connection.providerSpecificData, userId: "9999" },
+    });
+    const rejected = await leaseCredential(verification);
+    expect(rejected.status).toBe(404);
+    expect(await rejected.text()).not.toContain(connection.accessToken);
+    expect(__getCheckinSessionForTest(verification.checkinId).status).toBe("pending");
+  });
+
+  it("rejects expired and non-v2 sessions", async () => {
+    let verification = await startVerification();
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + CHECKIN_TTL_MS + 1);
+    expect((await leaseCredential(verification)).status).toBe(403);
+    vi.useRealTimers();
+
+    verification = await startVerification();
+    __getCheckinSessionForTest(verification.checkinId).protocol = "newapi-checkin-v1";
+    expect((await leaseCredential(verification)).status).toBe(403);
+  });
+});
+
+describe("newapi-checkin-v2 completion", () => {
   it("status never returns the secret", async () => {
     const verification = await startVerification();
     const response = await statusRoute.GET(new Request(
@@ -191,18 +300,27 @@ describe("newapi-checkin-v1 completion", () => {
 
   it("independently confirms provider status, rejects retargeting and ignores no client reward", async () => {
     const verification = await startVerification();
+    await leaseCredential(verification);
     mocks.getCheckinStatus.mockResolvedValueOnce({
       ok: true,
       checkin: { supported: true, enabled: true, checkedInToday: true, records: [] },
     });
-    const response = await completeRoute.POST(completeRequest(verification, { quotaAwarded: 999999 }));
+    const response = await completeRoute.POST(completeRequest(verification));
     expect(response.status).toBe(200);
     expect(mocks.getCheckinStatus).toHaveBeenCalled();
     expect((await response.json()).data).toEqual({ status: "success", checkedInToday: true });
 
     const mismatch = await startVerification();
+    await leaseCredential(mismatch);
     const rejected = await completeRoute.POST(completeRequest(mismatch, { providerOrigin: "https://evil.example" }));
     expect(rejected.status).toBe(403);
+
+    const clientData = await startVerification();
+    await leaseCredential(clientData);
+    for (const extra of [{ quotaAwarded: 999999 }, { checkedInToday: true }, { turnstile: "secret" }]) {
+      const invalid = await completeRoute.POST(completeRequest(clientData, extra));
+      expect(invalid.status).toBe(400);
+    }
   });
 
   it("rejects Turnstile tokens, expiry and duplicate completion", async () => {
@@ -216,6 +334,7 @@ describe("newapi-checkin-v1 completion", () => {
     vi.useRealTimers();
 
     verification = await startVerification();
+    await leaseCredential(verification);
     mocks.getCheckinStatus.mockResolvedValue({
       ok: true,
       checkin: { supported: true, enabled: true, checkedInToday: true, records: [] },
@@ -224,8 +343,14 @@ describe("newapi-checkin-v1 completion", () => {
     expect((await completeRoute.POST(completeRequest(verification))).status).toBe(403);
   });
 
-  it("fails when the extension claim is not confirmed by provider state", async () => {
+  it("requires a processing lease, then independently confirms provider state", async () => {
+    const pending = await startVerification();
+    const premature = await completeRoute.POST(completeRequest(pending));
+    expect(premature.status).toBe(403);
+    expect((await premature.json()).errorCode).toBe("invalid_state");
+
     const verification = await startVerification();
+    await leaseCredential(verification);
     const response = await completeRoute.POST(completeRequest(verification));
     expect(response.status).toBe(409);
     expect((await response.json()).errorCode).toBe("checkin_not_confirmed");
