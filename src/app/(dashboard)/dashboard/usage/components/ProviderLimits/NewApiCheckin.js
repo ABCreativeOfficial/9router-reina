@@ -85,9 +85,22 @@ export default function NewApiCheckin({ connection, onQuotaRefresh }) {
       const result = payload.data || {};
       if (result.status === "verification_required") {
         const verification = result.verification;
+        if (verification?.protocol !== "newapi-checkin-v2") {
+          throw new Error("Unsupported check-in protocol.");
+        }
         setSession(verification);
         setState((current) => ({ ...current, status: "verification_required" }));
-        popupRef.current = window.open(verification.loginUrl, "newapi_checkin", "width=600,height=760");
+        window.postMessage({
+          source: "9router-newapi-checkin",
+          protocol: verification.protocol,
+          type: "CHECKIN_SESSION",
+          checkinId: verification.checkinId,
+          checkinSecret: verification.checkinSecret,
+          providerOrigin: verification.providerOrigin,
+          routerOrigin: verification.routerOrigin,
+          expiresAt: verification.expiresAt,
+        }, window.location.origin);
+        popupRef.current = window.open(verification.launchUrl, "newapi_checkin", "width=600,height=760");
         if (!popupRef.current) notify.warning("Popup blocked. Allow popups, then retry.", "Verification required");
         return;
       }

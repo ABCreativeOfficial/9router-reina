@@ -4,8 +4,8 @@ import {
 } from "@/lib/newapi/pairing";
 import {
   CHECKIN_STATES,
-  claimCheckinSession,
   settleCheckinSession,
+  validateCheckinCompletion,
 } from "@/lib/newapi/checkin";
 import { fetchNewApiCheckinStatus, resolveNewApiCheckinConnection } from "@/lib/newapi/checkinService";
 import { isAcceptableCompletionOrigin, readRequestOrigin } from "@/lib/newapi/routerOrigin";
@@ -53,12 +53,16 @@ export async function POST(request) {
       return fail(400, "Unsupported bridge version.", "bridge_version");
     }
     const body = await request.json().catch(() => null);
-    if (!body || typeof body !== "object" || "turnstile" in body) {
+    if (!body || typeof body !== "object"
+      || Object.keys(body).some((key) => !["checkinId", "checkinSecret", "providerOrigin"].includes(key))) {
       return fail(400, "Invalid check-in payload.", "invalid_payload");
     }
 
     checkinId = typeof body.checkinId === "string" ? body.checkinId : "";
-    const claim = claimCheckinSession(checkinId, body.checkinSecret);
+    if (!checkinId || typeof body.checkinSecret !== "string" || typeof body.providerOrigin !== "string") {
+      return fail(400, "Invalid check-in payload.", "invalid_payload");
+    }
+    const claim = validateCheckinCompletion(checkinId, body.checkinSecret);
     if (!claim.ok) {
       return fail(claim.reason === "in_progress" ? 409 : 403, "Check-in session is no longer valid.", claim.reason);
     }
