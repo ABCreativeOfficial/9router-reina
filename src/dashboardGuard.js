@@ -229,7 +229,7 @@ export { isAuthenticated };
 function isSensitiveDashboardPath(pathname) {
   if (SENSITIVE_DASHBOARD_PATHS.some((p) => pathname.startsWith(p))) return true;
   // This action mints a v2 secret that can lease one stored management PAT.
-  return /^\/api\/usage\/[^/]+\/newapi-checkin$/.test(pathname);
+  return /^\/api\/usage\/[^/]+\/newapi-(checkin|referral)$/.test(pathname);
 }
 
 export const __test__ = {
