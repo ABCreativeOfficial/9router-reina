@@ -110,13 +110,13 @@ export default function NewApiReferral({ connection, onQuotaRefresh, footer = fa
   if (state.status === "unsupported") return null;
   if (state.status === "loading") {
     return footer
-      ? <div className="border-t border-black/10 px-3 py-3 text-[11px] text-text-muted dark:border-white/10">Referral · loading…</div>
+      ? <div className="border-t border-black/10 px-3 py-2 text-[10px] text-text-muted dark:border-white/10">Referral rewards · loading…</div>
       : <p className="mt-2 text-[11px] text-text-muted">Referral Rewards: loading…</p>;
   }
   if (state.status === "error") {
     return footer ? (
-      <div className="flex items-center justify-between gap-3 border-t border-black/10 px-3 py-3 text-[11px] dark:border-white/10">
-        <span className="truncate text-red-500">Referral unavailable</span>
+      <div className="flex items-center justify-between gap-2 border-t border-black/10 px-3 py-2 text-[10px] dark:border-white/10">
+        <span className="truncate text-red-500">Referral rewards unavailable</span>
         <button type="button" onClick={fetchReferral} className="shrink-0 font-medium text-primary underline">Retry</button>
       </div>
     ) : (
@@ -128,12 +128,12 @@ export default function NewApiReferral({ connection, onQuotaRefresh, footer = fa
 
   if (footer && !state.canTransfer) {
     return (
-      <div className="border-t border-black/10 px-3 py-4 dark:border-white/10">
-        <p className="text-[11px] font-medium text-text-primary">Referral rewards</p>
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-[11px] text-text-muted">No rewards yet</span>
-          {referralCode}
+      <div className="border-t border-black/10 px-3 py-2 dark:border-white/10">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          <span className="text-[11px] font-medium text-text-primary">Referral rewards</span>
+          <span className="text-[10px] text-text-muted">No rewards yet</span>
         </div>
+        {referralCode && <div className="mt-1 flex items-center">{referralCode}</div>}
         {copyState === "failed" && <p className="mt-1 text-[10px] text-red-500">Copy failed. Try again.</p>}
       </div>
     );
@@ -141,16 +141,16 @@ export default function NewApiReferral({ connection, onQuotaRefresh, footer = fa
 
   if (footer) {
     return (
-      <div className="border-t border-black/10 px-3 py-4 dark:border-white/10">
+      <div className="border-t border-black/10 px-3 py-2 dark:border-white/10">
         <p className="text-[11px] font-medium text-text-primary">Referral rewards</p>
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-[10px] sm:grid-cols-3">
-          <div><p className="text-text-muted">Pending</p><p className="mt-0.5 text-sm font-semibold tabular-nums text-text-primary">{formatAmount(state.pending)}</p></div>
-          <div><p className="text-text-muted">Earned</p><p className="mt-0.5 text-sm font-semibold tabular-nums text-text-primary">{formatAmount(state.totalEarned)}</p></div>
-          <div><p className="text-text-muted">Invites</p><p className="mt-0.5 text-sm font-semibold tabular-nums text-text-primary">{state.invites ?? 0}</p></div>
+        <div className="mt-1.5 grid grid-cols-3 gap-2 text-[10px]">
+          <div><p className="text-text-muted">Pending</p><p className="font-medium tabular-nums text-text-primary">{formatAmount(state.pending)}</p></div>
+          <div><p className="text-text-muted">Earned</p><p className="font-medium tabular-nums text-text-primary">{formatAmount(state.totalEarned)}</p></div>
+          <div><p className="text-text-muted">Invites</p><p className="font-medium tabular-nums text-text-primary">{state.invites ?? 0}</p></div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
           {referralCode || <span />}
-          <button type="button" onClick={transferAll} disabled={state.transferring} className="min-h-8 rounded-md border border-primary/25 bg-primary/5 px-3 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 disabled:opacity-50">
+          <button type="button" onClick={transferAll} disabled={state.transferring} className="flex h-7 shrink-0 items-center rounded-md border border-primary/30 bg-primary/5 px-2 text-[11px] font-medium text-primary transition-colors hover:bg-primary/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 disabled:opacity-50">
             {state.transferring ? "Transferring…" : "Transfer All →"}
           </button>
         </div>
