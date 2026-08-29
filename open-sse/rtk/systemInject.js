@@ -261,8 +261,18 @@ function injectGeminiSystem(body, prompt) {
 // Updates top-level systemPrompt and only the mirrored leading prefix of the
 // first user history turn, else current user. next = old + SEP + prompt.
 // Replace old leading prefix only; preserve time context and user tail.
+//
+// CUSTOM (#2989): this router's Kiro translators never emit a top-level
+// `systemPrompt` — Kiro answers 400 REQUEST_BODY_INVALID for that field, so the
+// system text is folded into the frozen first user turn instead. Therefore this
+// injector only ever *updates* a systemPrompt the body already owns; it must
+// never create one. Bodies without the field get the content-side prepend alone.
 function injectKiroSystem(body, prompt) {
   try {
+    let ownsSystemPrompt = false;
+    try {
+      ownsSystemPrompt = Object.prototype.hasOwnProperty.call(body, "systemPrompt");
+    } catch (_) {}
     let oldPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : "";
     // Repair path: a previous partial write left systemPrompt updated but user
     // content still mirroring the pre-write prefix. Re-derive the effective old
@@ -302,7 +312,12 @@ function injectKiroSystem(body, prompt) {
     } catch (_) { targetMsg = null; }
 
     let sysWritten = false;
-    try { body.systemPrompt = next; sysWritten = true; } catch (_) {}
+    // Only mirror into an existing systemPrompt. Creating the field on a body
+    // that lacks it would put this router's Kiro payloads back into the shape
+    // Kiro rejects (#2989) — the content-side prepend below carries the prompt.
+    if (ownsSystemPrompt) {
+      try { body.systemPrompt = next; sysWritten = true; } catch (_) {}
+    }
 
     const applyContent = () => {
       const content = typeof targetMsg.content === "string" ? targetMsg.content : "";
