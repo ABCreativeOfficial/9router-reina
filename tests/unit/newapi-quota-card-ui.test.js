@@ -33,6 +33,20 @@ describe("New API quota card presentation", () => {
     expect(parent).toContain("quotas={visibleQuotas}");
   });
 
+  it("puts an icon-only referral copy action beside Refresh", () => {
+    expect(card).toContain("useCopyToClipboard()");
+    expect(card).toContain("{referralCode && (");
+    expect(card).toContain('copied === copyId ? "Copied" : "Copy referral code"');
+    expect(card).toContain('aria-label="Copy referral code"');
+    expect(card).toContain("copy(referralCode, copyId)");
+    expect(card).toContain('copied === copyId ? "check" : "content_copy"');
+    expect(card).toContain("onReferralCodeChange={handleReferralCodeChange}");
+    expect(card.indexOf('aria-label="Copy referral code"'))
+      .toBeLessThan(card.indexOf('aria-label="Refresh quota"'));
+    // Icon-only: no visible code text in the header control.
+    expect(card).not.toContain(">{referralCode}<");
+  });
+
   it("keeps the standard header actions and wires existing behavior", () => {
     for (const marker of [
       'aria-label="Refresh quota"',
@@ -56,20 +70,22 @@ describe("New API quota card presentation", () => {
     expect(checkin).toContain("flex-wrap");
   });
 
-  it("uses a flat referral footer rather than a nested card", () => {
+  it("uses a flat referral footer without a duplicate code control", () => {
     expect(referral).toContain("if (footer)");
     expect(referral).toContain("border-t border-black/10");
     expect(referral).toContain("Referral rewards");
     expect(referral).toContain("Transfer All →");
-    expect(referral).toContain('aria-label="Copy referral code"');
+    expect(referral).toContain("onReferralCodeChange(state.status === \"ready\" ? state.affCode || \"\" : \"\")");
     expect(referral).toContain("formatAmount(state.pending)");
     expect(referral).toContain("formatAmount(state.totalEarned)");
+    expect(referral).not.toContain("navigator.clipboard");
+    expect(referral).not.toContain('aria-label="Copy referral code"');
   });
 
-  it("collapses zero pending into a compact footer with the code still copyable", () => {
+  it("collapses zero pending into a compact footer without a transfer button", () => {
     const zero = referral.slice(referral.indexOf("if (footer && !state.canTransfer)"), referral.indexOf("if (footer) {"));
+    expect(zero).toContain("Referral rewards");
     expect(zero).toContain("No rewards yet");
-    expect(zero).toContain("referralCode");
     expect(zero).not.toContain("Transfer All");
     expect(zero).not.toContain("disabled=");
   });
