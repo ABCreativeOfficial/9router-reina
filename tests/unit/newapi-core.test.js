@@ -118,6 +118,79 @@ describe("New API management requests", () => {
   });
 });
 
+describe("New API referral management", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("normalizes referral fields from self with management authentication", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: {
+        id: 4242,
+        quota: 900000,
+        used_quota: 100000,
+        aff_code: "abcd",
+        aff_count: 22,
+        aff_quota: 160000,
+        aff_history_quota: 440000,
+      },
+    }));
+
+    const result = await client().getSelf(TOKEN, USER_ID);
+    expect(result.self).toEqual({
+      userId: USER_ID,
+      quota: 900000,
+      usedQuota: 100000,
+      referralSupported: true,
+      affCode: "abcd",
+      affCount: 22,
+      affQuota: 160000,
+      affHistoryQuota: 440000,
+    });
+    const [url, options] = proxyAwareFetch.mock.calls[0];
+    expect(url).toBe(`${ORIGIN}/api/user/self`);
+    expect(options.headers.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(options.headers["New-Api-User"]).toBe(USER_ID);
+  });
+
+  it("detects referral support from response shape", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(jsonResponse({
+      success: true,
+      data: { id: 4242, quota: 1, used_quota: 0 },
+    }));
+    expect((await client().getSelf(TOKEN, USER_ID)).self.referralSupported).toBe(false);
+  });
+
+  it("posts one positive integer transfer and rejects invalid amounts", async () => {
+    const api = client();
+    for (const amount of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect((await api.transferAffiliateQuota(TOKEN, USER_ID, amount)).status).toBe(400);
+    }
+    expect(proxyAwareFetch).not.toHaveBeenCalled();
+
+    proxyAwareFetch.mockResolvedValueOnce(jsonResponse({ success: true }));
+    expect(await api.transferAffiliateQuota(TOKEN, USER_ID, 50000)).toMatchObject({ ok: true });
+    const [url, options] = proxyAwareFetch.mock.calls[0];
+    expect(url).toBe(`${ORIGIN}/api/user/aff_transfer`);
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({ quota: 50000 });
+  });
+
+  it("treats HTTP-200 business refusal as failure without exposing credentials or retrying", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(jsonResponse({ success: false, message: "Payment verification required" }));
+    const result = await client().transferAffiliateQuota(TOKEN, USER_ID, 50000);
+    expect(result).toMatchObject({ ok: false, status: 422, message: "Payment verification required" });
+    expect(JSON.stringify(result)).not.toContain(TOKEN);
+    expect(proxyAwareFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("redacts credential-shaped upstream messages", async () => {
+    proxyAwareFetch.mockResolvedValueOnce(jsonResponse({ success: false, message: `Authorization Bearer ${TOKEN}` }));
+    const result = await client().transferAffiliateQuota(TOKEN, USER_ID, 50000);
+    expect(result.message).toBe("Example referral transfer was refused.");
+    expect(JSON.stringify(result)).not.toContain(TOKEN);
+  });
+});
+
 describe("New API token handling", () => {
   beforeEach(() => vi.clearAllMocks());
 

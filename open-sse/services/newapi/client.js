@@ -27,6 +27,7 @@ export const NEW_API_DEFAULT_PATHS = Object.freeze({
   usage: "/api/data/self",
   tokens: "/api/token/",
   checkin: "/api/user/checkin",
+  affiliateTransfer: "/api/user/aff_transfer",
   inferenceModels: "/v1/models",
 });
 
@@ -142,6 +143,29 @@ function parseAccount(raw, normalizedUserId) {
   };
 }
 
+function parseSelf(raw, normalizedUserId) {
+  const hasReferralFields = ["aff_quota", "aff_history_quota", "aff_count"]
+    .every((key) => Object.hasOwn(raw, key));
+  return {
+    userId: normalizedUserId,
+    quota: optionalNumber(raw.quota),
+    usedQuota: optionalNumber(raw.used_quota),
+    referralSupported: hasReferralFields,
+    affCode: cleanString(raw.aff_code, 200),
+    affCount: optionalNumber(raw.aff_count),
+    affQuota: optionalNumber(raw.aff_quota),
+    affHistoryQuota: optionalNumber(raw.aff_history_quota),
+  };
+}
+
+function sanitizeBusinessMessage(value, fallback) {
+  const message = cleanString(value, 300);
+  if (!message || /bearer|authorization|access[_ -]?token|refresh[_ -]?token|api[_ -]?key/i.test(message)) {
+    return fallback;
+  }
+  return message;
+}
+
 /**
  * Build a management client for one New API deployment.
  *
@@ -211,7 +235,7 @@ export function createNewApiClient(config) {
     }
   }
 
-  async function getAccount(accessToken, userId, proxyOptions = null) {
+  async function getSelf(accessToken, userId, proxyOptions = null) {
     const normalizedUserId = normalizeNewApiUserId(userId);
     const result = await requestJson(endpoints.account, {
       accessToken,
@@ -224,15 +248,66 @@ export function createNewApiClient(config) {
     if (!raw || typeof raw !== "object") {
       return { ok: false, status: 502, message: `${label} returned an invalid account response.` };
     }
-    // The server-side id is authoritative: a caller cannot claim another account.
     if (normalizeNewApiUserId(raw.id) !== normalizedUserId) {
       return { ok: false, status: 403, message: `${label} account ID does not match.` };
     }
+    return { ok: true, status: result.status, self: parseSelf(raw, normalizedUserId), raw };
+  }
+
+  async function getAccount(accessToken, userId, proxyOptions = null) {
+    const normalizedUserId = normalizeNewApiUserId(userId);
+    const result = await getSelf(accessToken, normalizedUserId, proxyOptions);
+    if (!result.ok) return result;
+    const raw = result.raw;
     if (raw.status !== activeStatus) {
       return { ok: false, status: 403, message: `${label} account is disabled.` };
     }
-
     return { ok: true, account: accountParser(raw, normalizedUserId) };
+  }
+
+  async function transferAffiliateQuota(accessToken, userId, quota, proxyOptions = null) {
+    const amount = Number(quota);
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      return { ok: false, status: 400, message: "Referral transfer amount must be a positive integer." };
+    }
+
+    const token = cleanString(accessToken, MAX_TOKEN_LENGTH);
+    const normalizedUserId = normalizeNewApiUserId(userId);
+    if (!token || !normalizedUserId) {
+      return { ok: false, status: 400, message: `${label} management credentials are required.` };
+    }
+
+    try {
+      const response = await proxyAwareFetch(endpoints.affiliateTransfer, {
+        method: "POST",
+        headers: {
+          ...managementHeaders(token, normalizedUserId),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ quota: amount }),
+        redirect: "error",
+        signal: AbortSignal.timeout(timeoutMs),
+      }, proxyOptions);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.success !== true) {
+        const fallback = response.status === 401 || response.status === 403
+          ? `${label} management authentication failed.`
+          : `${label} referral transfer was refused.`;
+        return {
+          ok: false,
+          status: response.status >= 400 ? response.status : 422,
+          message: sanitizeBusinessMessage(payload?.message, fallback),
+        };
+      }
+      return { ok: true, status: response.status };
+    } catch {
+      return {
+        ok: false,
+        status: 502,
+        ambiguous: true,
+        message: `${label} referral transfer result is unknown. Refresh before retrying.`,
+      };
+    }
   }
 
   async function listTokens(accessToken, userId, proxyOptions = null) {
@@ -423,7 +498,9 @@ export function createNewApiClient(config) {
     endpoints,
     activeStatus,
     requestJson,
+    getSelf,
     getAccount,
+    transferAffiliateQuota,
     listTokens,
     createToken,
     retrieveTokenKey,
