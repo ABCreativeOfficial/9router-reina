@@ -14,9 +14,11 @@ const providerLimits = readFileSync(
 );
 
 describe("New API check-in UI contract", () => {
-  it("mounts only for dynamic New API connections", () => {
-    expect(providerLimits).toContain("isNewApiConnection(conn) &&");
-    expect(providerLimits).toContain("<NewApiCheckin");
+  it("mounts through the dedicated dynamic New API card", () => {
+    expect(providerLimits).toContain("const isNewApi = isNewApiConnection(conn)");
+    expect(providerLimits).toContain("if (isNewApi)");
+    expect(providerLimits).toContain("<NewApiQuotaCard");
+    expect(component).toContain("embedded = false");
   });
 
   it("covers push completion, polling fallback and fast-path states", () => {
