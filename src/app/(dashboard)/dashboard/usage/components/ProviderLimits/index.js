@@ -1058,6 +1058,7 @@ export default function ProviderLimits() {
                 key={conn.id}
                 connection={conn}
                 quota={quota}
+                quotas={visibleQuotas}
                 loading={isLoading}
                 error={error}
                 providerName={providerDisplayName}
