@@ -12,6 +12,8 @@ import "../translator/registerAll.js";
 import { translateRequest } from "../../open-sse/translator/index.js";
 import { FORMATS } from "../../open-sse/translator/formats.js";
 import { resolveKiroModel, resolveKiroModelIntent } from "../../open-sse/config/kiroConstants.js";
+import { openaiToKiroRequest } from "../../open-sse/translator/request/openai-to-kiro.js";
+import { injectSystemPrompt } from "../../open-sse/rtk/systemInject.js";
 import { validateKiroConversation } from "../../open-sse/translator/concerns/kiroConversation.js";
 
 const C2K = (body, credentials = null, model = "claude-sonnet-4.5") =>
@@ -343,5 +345,56 @@ describe("Kiro / Claude Code regression — MCP / tools", () => {
       expect(s.toolSpecification.inputSchema.json.type).toBe("object");
     }
     assertWireValid(out, specs);
+  });
+
+  it("N: MCP double-underscore names survive both translator paths", () => {
+    const mcp = {
+      name: "mcp__server__tool",
+      description: "An MCP tool",
+      input_schema: { type: "object", properties: { arg: { type: "string" } } },
+    };
+    const out = C2K({ tools: [mcp], messages: [{ role: "user", content: "call it" }] });
+    assertNoInvalidTopLevel(out);
+    expect(JSON.stringify(out)).toContain("mcp__server__tool");
+
+    const o2k = openaiToKiroRequest("claude-sonnet-4.5", {
+      messages: [{ role: "user", content: "call it" }],
+      tools: [{ type: "function", function: { name: "mcp__server__tool", parameters: mcp.input_schema } }],
+    }, true, {});
+    expect(o2k.systemPrompt).toBeUndefined();
+    expect(JSON.stringify(o2k)).toContain("mcp__server__tool");
+  });
+});
+
+// The token savers run AFTER translation, on the already-built Kiro payload
+// (chatCore: injectCaveman/injectPonytail with finalFormat === "kiro"). Upstream's
+// injector mirrors the prompt into a top-level `systemPrompt`; on this fork that
+// field must never be created, or #2989 returns through the back door.
+describe("Kiro / Claude Code regression — post-translation system injection (#2989)", () => {
+  const MODELS = [
+    "claude-sonnet-4.5-thinking",
+    "claude-sonnet-4.5-agentic",
+    "claude-sonnet-4.5-thinking-agentic",
+    "claude-sonnet-4.5-agentic-thinking",
+  ];
+
+  it.each(MODELS)("%s survives injectSystemPrompt with no top-level systemPrompt", (model) => {
+    const out = C2K(
+      { system: "SYSTEM_MARKER", messages: [{ role: "user", content: "hi" }] },
+      creds(uniq("inject")),
+      model
+    );
+    assertNoInvalidTopLevel(out);
+
+    injectSystemPrompt(out, FORMATS.KIRO, "SAVER_MARKER");
+
+    // field still absent — the prompt travels inside user content instead
+    assertNoInvalidTopLevel(out);
+    const first = out.conversationState.history.find((h) => h?.userInputMessage)?.userInputMessage
+      ?? curOf(out);
+    expect(first.content).toContain("SAVER_MARKER");
+    expect(first.content).toContain("SYSTEM_MARKER");
+    expect(curOf(out).modelId).toBe("claude-sonnet-4.5");
+    assertWireValid(out);
   });
 });
