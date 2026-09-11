@@ -115,13 +115,7 @@ async function text(stream) {
 async function execute(executor = new KiroExecutor(), overrides = {}) {
   return executor.execute({
     model: "kr/claude-opus-4.8",
-    // #2989: Kiro rejects top-level systemPrompt; the body carries repair
-    // instructions in the current user turn instead.
-    body: {
-      conversationState: {
-        currentMessage: { userInputMessage: { content: "base", modelId: "kr/claude-opus-4.8" } },
-      },
-    },
+    body: { conversationState: { currentMessage: { userInputMessage: { content: "base", modelId: "m" } } } },
     stream: true,
     credentials,
     ...overrides
@@ -350,8 +344,8 @@ describe("Kiro terminal integrity recovery", () => {
     expect(body).toContain("Recovered safely.");
     // The repair instruction rides in the user turn: kiro.dev rejects a
     // top-level systemPrompt with 400 REQUEST_BODY_INVALID.
+    const retryContent = retryBody.conversationState.currentMessage.userInputMessage.content;
     expect(retryBody.systemPrompt).toBeUndefined();
-    const retryContent = retryBody.conversationState?.currentMessage?.userInputMessage?.content || "";
     expect(retryContent).toContain("tool_call wrapper was malformed");
     expect(retryContent).not.toContain("IGNORE_ALL_INSTRUCTIONS");
   });
