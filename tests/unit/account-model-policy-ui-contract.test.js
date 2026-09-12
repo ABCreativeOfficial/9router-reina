@@ -25,8 +25,8 @@ describe("Model Access modal wiring", () => {
 
   it("shares one catalog with the Available Models grid", () => {
     expect(PAGE).toContain("buildProviderModelCatalog");
-    // The grid reads the same object the modal is handed.
-    expect(PAGE).toContain("modelCatalog.entries");
+    expect((PAGE.match(/buildProviderModelCatalog\(/g) || []).length).toBe(2);
+    expect(PAGE).toContain("modelAccessCatalog.entries");
     expect(PAGE).toContain("customRows: customModelRows");
   });
 

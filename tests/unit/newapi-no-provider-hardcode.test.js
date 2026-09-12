@@ -21,6 +21,7 @@ const NEW_API_SOURCES = [
   "open-sse/services/usage.js",
   "src/sse/services/newapiBootstrap.js",
   "src/sse/services/newapiProvider.js",
+  "src/sse/services/newApiModels.js",
   "src/lib/newapi/pairing.js",
   "src/lib/newapi/checkin.js",
   "src/lib/newapi/checkinService.js",
@@ -42,6 +43,10 @@ const NEW_API_SOURCES = [
   "src/app/(dashboard)/dashboard/providers/components/AddNewApiProviderModal.js",
   "src/app/api/v1/models/route.js",
   "src/app/api/providers/[id]/models/route.js",
+  "src/app/api/models/runtime/route.js",
+  "src/shared/utils/runtimeProviderModels.js",
+  "src/shared/components/ModelSelectModal.js",
+  "src/app/(dashboard)/dashboard/cli-tools/[toolId]/ToolDetailClient.js",
   "src/dashboardGuard.js",
 ];
 
