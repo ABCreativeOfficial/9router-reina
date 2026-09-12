@@ -14,8 +14,8 @@ import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
 import { resolveClinepassModels, resolveClineModels } from "open-sse/services/clinepassModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
-import { createNewApiClientForConnection } from "open-sse/services/newapi/resolve.js";
 import { isNewApiConnection } from "open-sse/services/newapi/definition.js";
+import { resolveNewApiConnectionModels } from "@/sse/services/newApiModels";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
@@ -44,27 +44,6 @@ async function resolveQoderLiveModels(conn, provider) {
   const models = routableQoderModels(result);
   if (!models.length) return null;
   return { models: models.map((m) => ({ id: m.id, name: m.name })) };
-}
-
-// A New API connection serves an account-specific catalog behind its management
-// credential. The client is built from the connection's own trusted origin, so no
-// provider id is involved.
-async function resolveNewApiLiveModels(conn) {
-  const client = createNewApiClientForConnection(conn);
-  if (!client) return null;
-  const proxy = await resolveConnectionProxyConfig(conn.providerSpecificData || {});
-  const result = await client.fetchModels(
-    conn.accessToken,
-    conn.providerSpecificData?.userId,
-    {
-      connectionProxyEnabled: proxy.connectionProxyEnabled === true,
-      connectionProxyUrl: proxy.connectionProxyUrl || "",
-      connectionNoProxy: proxy.connectionNoProxy || "",
-      vercelRelayUrl: proxy.vercelRelayUrl || "",
-      strictProxy: proxy.strictProxy === true,
-    },
-  );
-  return result.ok && result.models.length ? { models: result.models } : null;
 }
 
 // Per-provider live model resolvers. Each receives a connection record and
@@ -290,6 +269,10 @@ export async function buildModelsList(kindFilter, options = {}) {
   // 9router instance's fetchCompatibleModelIds — skip dynamic fetch to break
   // cross-instance recursive loops.
   const skipDynamicFetch = options.skipDynamicFetch === true;
+  const includeCombos = options.includeCombos !== false;
+  const providerIdFilter = Array.isArray(options.providerIds)
+    ? new Set(options.providerIds)
+    : null;
   let connections = [];
   try {
     connections = await getProviderConnections();
@@ -299,24 +282,31 @@ export async function buildModelsList(kindFilter, options = {}) {
   }
 
   let combos = [];
-  try {
-    combos = await getCombos();
-  } catch (e) {
-    console.log("Could not fetch combos");
+  if (includeCombos) {
+    try {
+      combos = await getCombos();
+    } catch (e) {
+      console.log("Could not fetch combos");
+    }
   }
 
+  const runtimeOnly = options.runtimeOnly === true;
   let customModels = [];
-  try {
-    customModels = await getCustomModels();
-  } catch (e) {
-    console.log("Could not fetch custom models");
+  if (!runtimeOnly) {
+    try {
+      customModels = await getCustomModels();
+    } catch (e) {
+      console.log("Could not fetch custom models");
+    }
   }
 
   let modelAliases = {};
-  try {
-    modelAliases = await getModelAliases();
-  } catch (e) {
-    console.log("Could not fetch model aliases");
+  if (!runtimeOnly) {
+    try {
+      modelAliases = await getModelAliases();
+    } catch (e) {
+      console.log("Could not fetch model aliases");
+    }
   }
 
   let disabledByAlias = {};
@@ -345,7 +335,7 @@ export async function buildModelsList(kindFilter, options = {}) {
 
   // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
   for (const combo of combos) {
-    if (!comboMatchesKinds(combo, kindFilter)) continue;
+    if (!includeCombos || !comboMatchesKinds(combo, kindFilter)) continue;
     const entry = {
       id: combo.name,
       object: "model",
@@ -360,7 +350,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     models.push(entry);
   }
 
-  if (connections.length === 0) {
+  if (connections.length === 0 && !runtimeOnly && !providerIdFilter) {
     // DB unavailable -> return static models, filtered by per-model kind
     const aliasToProviderId = Object.fromEntries(
       Object.entries(PROVIDER_ID_TO_ALIAS).map(([id, alias]) => [alias, id])
@@ -398,6 +388,8 @@ export async function buildModelsList(kindFilter, options = {}) {
     }
   } else {
     for (const [providerId, conn] of activeConnectionByProvider.entries()) {
+      if (providerIdFilter && !providerIdFilter.has(providerId)) continue;
+      if (runtimeOnly && !isNewApiConnection(conn)) continue;
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
 
       const staticAlias = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
@@ -407,6 +399,7 @@ export async function buildModelsList(kindFilter, options = {}) {
         || staticAlias
       ).trim();
       const providerModels = PROVIDER_MODELS[staticAlias] || [];
+      const isNewApiProviderPool = isNewApiConnection(conn);
       // Per-account model access is a union across the provider's active accounts:
       // a model stays visible while at least one account can serve it, and an
       // unrestricted account keeps the full catalog visible.
@@ -425,13 +418,16 @@ export async function buildModelsList(kindFilter, options = {}) {
       );
       let liveModelKindById = new Map();
       let liveCapabilitiesById = new Map();
+      let liveNameById = new Map();
 
       // New API providers are per-account live: the union is built across every
       // active connection, each filtered by its own enabledModels policy. Detected
       // by family from the connection, never by provider id.
-      const isNewApiProviderPool = isNewApiConnection(conn);
       const liveResolver = isNewApiProviderPool
-        ? resolveNewApiLiveModels
+        ? async (candidate) => {
+            const result = await resolveNewApiConnectionModels(candidate);
+            return result?.ok && result.models.length ? { models: result.models } : null;
+          }
         : LIVE_MODEL_RESOLVERS[providerId];
 
       let rawModelIds = hasExplicitEnabledModels
@@ -476,6 +472,9 @@ export async function buildModelsList(kindFilter, options = {}) {
             liveModelKindById = new Map(liveModels.map((m) => [m.id, modelKind(m)]));
             liveCapabilitiesById = new Map(
               liveModels.filter((m) => m.capabilities).map((m) => [m.id, m.capabilities])
+            );
+            liveNameById = new Map(
+              liveModels.filter((m) => m.name).map((m) => [m.id, m.name])
             );
           }
         } catch (err) {
@@ -564,6 +563,10 @@ export async function buildModelsList(kindFilter, options = {}) {
           id: `${outputAlias}/${modelId}`,
           object: "model",
           owned_by: outputAlias,
+          ...(options.includeProviderId === true ? {
+            provider_id: providerId,
+            model_name: liveNameById.get(modelId) || modelId,
+          } : {}),
         };
         // Live-catalog resolvers (kiro/qoder/github/clinepass) mostly only return
         // { id, name } — no per-model capability data. Fall back to the same

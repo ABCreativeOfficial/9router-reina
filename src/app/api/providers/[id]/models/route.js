@@ -13,29 +13,7 @@ import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
-import { createNewApiClientForConnection } from "open-sse/services/newapi/resolve.js";
-
-// A New API connection carries its deployment's trusted origin, so its
-// account-specific catalog resolves from the connection itself — no provider-id
-// entry and no registry membership required.
-async function resolveNewApiModels(connection) {
-  const client = createNewApiClientForConnection(connection);
-  if (!client) return null;
-  const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
-  const result = await client.fetchModels(
-    connection.accessToken,
-    connection.providerSpecificData?.userId,
-    {
-      connectionProxyEnabled: proxy.connectionProxyEnabled === true,
-      connectionProxyUrl: proxy.connectionProxyUrl || "",
-      connectionNoProxy: proxy.connectionNoProxy || "",
-      vercelRelayUrl: proxy.vercelRelayUrl || "",
-      strictProxy: proxy.strictProxy === true,
-    },
-  );
-  if (!result.ok) return { error: result.message, status: result.status };
-  return { models: result.models };
-}
+import { resolveNewApiConnectionModels } from "@/sse/services/newApiModels";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
@@ -554,10 +532,10 @@ export async function GET(request, { params }) {
     // New API first: its provider ids live in the openai-compatible namespace, but
     // the account-specific catalog comes from the management API, not from
     // `<baseUrl>/models` with the inference key.
-    const newApiModels = await resolveNewApiModels(connection);
+    const newApiModels = await resolveNewApiConnectionModels(connection);
     if (newApiModels) {
-      if (newApiModels.error) {
-        return NextResponse.json({ error: newApiModels.error }, { status: newApiModels.status || 502 });
+      if (!newApiModels.ok) {
+        return NextResponse.json({ error: newApiModels.message }, { status: newApiModels.status || 502 });
       }
       return NextResponse.json({
         provider: connection.provider,
