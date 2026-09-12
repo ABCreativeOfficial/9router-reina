@@ -10,6 +10,7 @@ import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
 import { parseSearchQuery, matchesSearch } from "@/shared/utils/modelSearchFilter";
 import { getDeactivatedProviderIds } from "@/shared/utils/connectionStatus";
+import { buildRuntimeProviderCatalog, fetchRuntimeProviderModels } from "@/shared/utils/runtimeProviderModels";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
 const PROVIDER_ORDER = [
@@ -26,6 +27,9 @@ const NO_AUTH_PROVIDER_IDS = Object.keys(FREE_PROVIDERS).filter(id => FREE_PROVI
 // Static registry stays as fallback when live fetch fails or is empty.
 // zed added in #4244: its backend customResolver already returns live models
 // but the frontend omitted it, hiding Zed entirely from the Combo picker.
+// Runtime New API providers are NOT listed here — they resolve through the
+// shared /api/models/runtime source below, since their provider ids are
+// user-created and cannot be enumerated statically.
 const LIVE_CATALOG_PROVIDERS = ["cursor", "cline", "clinepass", "zed"];
 
 // Fetch a provider's account-scoped catalog for every active connection and merge
@@ -135,6 +139,7 @@ export default function ModelSelectModal({
   const [providerNodes, setProviderNodes] = useState([]);
   const [customModels, setCustomModels] = useState([]);
   const [disabledModels, setDisabledModels] = useState({});
+  const [runtimeModels, setRuntimeModels] = useState({});
   // Cursor and Cline expose the usable catalog per account, so the static catalog is
   // kept only as a fallback: it goes stale quickly and entitlements differ per account.
   // Single map driven by LIVE_CATALOG_PROVIDERS so the constant cannot drift
@@ -156,6 +161,15 @@ export default function ModelSelectModal({
   const clineModels = useLiveProviderModels(isOpen, clineConnectionIds, "Cline");
   const clinepassModels = useLiveProviderModels(isOpen, clinepassConnectionIds, "ClinePass");
   const zedModels = useLiveProviderModels(isOpen, zedConnectionIds, "Zed");
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    let cancelled = false;
+    fetchRuntimeProviderModels(filteredActiveProviders).then((models) => {
+      if (!cancelled) setRuntimeModels(models);
+    });
+    return () => { cancelled = true; };
+  }, [isOpen, filteredActiveProviders]);
 
   const fetchCombos = async () => {
     try {
@@ -222,6 +236,10 @@ export default function ModelSelectModal({
   }, [isOpen]);
 
   const allProviders = useMemo(() => ({ ...OAUTH_PROVIDERS, ...FREE_PROVIDERS, ...FREE_TIER_PROVIDERS, ...APIKEY_PROVIDERS }), []);
+  const runtimeCatalog = useMemo(
+    () => buildRuntimeProviderCatalog({ connections: filteredActiveProviders, runtimeModels }),
+    [filteredActiveProviders, runtimeModels]
+  );
 
   // Group models by provider with priority order
   const groupedModels = useMemo(() => {
@@ -362,8 +380,11 @@ export default function ModelSelectModal({
         // Find connection object to get prefix synchronously without waiting for providerNodes fetch
         const connection = filteredActiveProviders.find(p => p.provider === providerId) || effectiveConnections.find(p => p.provider === providerId);
         const matchedNode = providerNodes.find(node => node.id === providerId);
-        const displayName = matchedNode?.name || connection?.name || providerInfo.name;
-        const nodePrefix = connection?.providerSpecificData?.prefix || matchedNode?.prefix || providerId;
+        const runtimeProvider = runtimeCatalog[providerId]?.isRuntime === true
+          ? runtimeCatalog[providerId]
+          : null;
+        const displayName = runtimeProvider?.name || matchedNode?.name || connection?.name || providerInfo.name;
+        const nodePrefix = runtimeProvider?.alias || connection?.providerSpecificData?.prefix || matchedNode?.prefix || providerId;
 
         // Aliases are stored using the raw providerId as key (e.g. "openai-compatible-chat-<uuid>/glm-4.7"),
         // so we must filter by providerId, not by the display prefix.
@@ -385,26 +406,42 @@ export default function ModelSelectModal({
             value: `${nodePrefix}/${m.id}`,
             isCustom: true,
           }));
-        const seen = new Set(nodeModels.map((m) => m.value));
-        const mergedModels = [...nodeModels, ...registeredCustom.filter((m) => !seen.has(m.value))];
+        const runtimeProviderModels = (runtimeProvider?.models || []).map((model) => ({
+          ...model,
+          name: model.name || model.id,
+          value: `${nodePrefix}/${model.id}`,
+        }));
+        const seen = new Set();
+        const mergedModels = (runtimeProvider
+          ? runtimeProviderModels
+          : [...nodeModels, ...registeredCustom]
+        ).filter((model) => {
+          if (seen.has(model.value)) return false;
+          seen.add(model.value);
+          return true;
+        });
 
-        // Always show compatible providers that are connected, even with no aliases.
-        // When no aliases exist, show a placeholder so users know it's available.
-        const modelsToShow = mergedModels.length > 0 ? mergedModels : [{
-          id: `__placeholder__${providerId}`,
-          name: `${nodePrefix}/model-id`,
-          value: `${nodePrefix}/model-id`,
-          isPlaceholder: true,
-        }];
+        // Plain compatible providers keep their editable placeholder. New API
+        // providers have no static catalog: an empty live response stays empty.
+        const modelsToShow = mergedModels.length > 0 || runtimeProvider?.isRuntime === true
+          ? mergedModels
+          : [{
+              id: `__placeholder__${providerId}`,
+              name: `${nodePrefix}/model-id`,
+              value: `${nodePrefix}/model-id`,
+              isPlaceholder: true,
+            }];
 
-        groups[providerId] = {
-          name: displayName,
-          alias: nodePrefix,
-          color: providerInfo.color,
-          models: modelsToShow,
-          isCustom: true,
-          hasModels: mergedModels.length > 0,
-        };
+        if (modelsToShow.length > 0) {
+          groups[providerId] = {
+            name: displayName,
+            alias: nodePrefix,
+            color: providerInfo.color,
+            models: modelsToShow,
+            isCustom: true,
+            hasModels: mergedModels.length > 0,
+          };
+        }
       } else {
         const liveModels = providerId === "cursor" ? cursorModels : providerId === "cline" ? clineModels : providerId === "clinepass" ? clinepassModels : providerId === "zed" ? zedModels : [];
         const hardcodedModels = liveModels.length > 0
@@ -500,7 +537,7 @@ export default function ModelSelectModal({
     });
 
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, effectiveConnections, deactivatedProviderIds, cursorModels, clineModels, clinepassModels, zedModels]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, effectiveConnections, deactivatedProviderIds, cursorModels, clineModels, clinepassModels, zedModels, runtimeCatalog]);
 
   // Parse search query into structured query (regex, positive tokens, negative tokens)
   const parsedQuery = useMemo(() => parseSearchQuery(searchQuery), [searchQuery]);
