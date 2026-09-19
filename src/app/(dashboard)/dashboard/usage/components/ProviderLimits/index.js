@@ -1069,9 +1069,13 @@ export default function ProviderLimits() {
 
           // Use table layout for all providers
           const isInactive = conn.isActive === false;
-          const providerDisplayName = getProviderDisplayName(conn);
-          const providerDisplayInitials = getProviderDisplayInitials(conn);
           const isNewApi = isNewApiConnection(conn);
+          // New API rows carry their own persisted label; static providers keep
+          // the registry display name upstream resolves via AI_PROVIDERS.
+          const providerDisplayName = isNewApi
+            ? getProviderDisplayName(conn)
+            : providerLabel(conn.provider);
+          const providerDisplayInitials = getProviderDisplayInitials(conn);
           const isCodex = conn.provider === "codex";
           const resetCreditCount = getCodexResetCreditCount(quota);
           const isResettingLimit = resettingLimitId === conn.id;
