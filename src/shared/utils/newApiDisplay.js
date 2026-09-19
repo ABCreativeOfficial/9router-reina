@@ -7,8 +7,6 @@
  * persisted field or DB lookup is needed here.
  */
 
-import { AI_PROVIDERS } from "@/shared/constants/providers";
-
 /** First two alias characters, uppercase; provider-name fallback when missing. */
 export function getNewApiInitials(alias, name) {
   const source = (typeof alias === "string" && alias.trim())
@@ -17,16 +15,10 @@ export function getNewApiInitials(alias, name) {
   return source.slice(0, 2).toUpperCase();
 }
 
-/**
- * Persisted New API label, else the registry display name for a static
- * provider, else the raw id as a last resort.
- */
+/** Persisted New API label, falling back to the internal id only for non-family rows. */
 export function getProviderDisplayName(connection) {
   const label = connection?.providerSpecificData?.newApiLabel;
-  if (typeof label === "string" && label.trim()) return label;
-  const providerId = connection?.provider;
-  if (!providerId) return "Provider";
-  return AI_PROVIDERS[providerId]?.name || providerId;
+  return (typeof label === "string" && label.trim()) || connection?.provider || "Provider";
 }
 
 /** Alias-first initials for New API; existing provider-id rule otherwise. */
