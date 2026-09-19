@@ -25,7 +25,10 @@ describe("dynamic New API display wiring", () => {
   });
 
   it("renders Quota Tracker cards and filters through display metadata", () => {
-    expect(QUOTA).toContain("const providerDisplayName = getProviderDisplayName(conn)");
+    // New API rows use the persisted display metadata; static providers keep the
+    // registry name upstream resolves via AI_PROVIDERS.
+    expect(QUOTA).toContain("getProviderDisplayName(conn)");
+    expect(QUOTA).toContain("providerLabel(conn.provider)");
     expect(QUOTA).toContain("const providerDisplayInitials = getProviderDisplayInitials(conn)");
     expect(QUOTA).toContain("{providerDisplayName}");
     expect(QUOTA).toContain("fallbackText={providerDisplayInitials}");
