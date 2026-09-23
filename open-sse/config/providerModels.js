@@ -1,8 +1,8 @@
 import REGISTRY from "../providers/registry/index.js";
 // PROVIDER_MODELS now built from providers/registry (transport + models co-located)
 import { PROVIDER_MODELS } from "../providers/index.js";
-import { modelQuotaFamily, modelStrip, modelTargetFormat, modelSupportedFormats, normalizeModelId } from "../providers/models/schema.js";
-import { CODEX_REVIEW_SUFFIX, isMuseSparkModel, opencodeFamilyFormats } from "../providers/models/helpers.js";
+import { modelQuotaFamily, modelStrip, modelTargetFormat, modelSupportedFormats, modelIsInternal, normalizeModelId } from "../providers/models/schema.js";
+import { isMuseSparkModel, opencodeFamilyFormats } from "../providers/models/helpers.js";
 import { FORMATS } from "../translator/formats.js";
 export { PROVIDER_MODELS };
 
@@ -27,16 +27,19 @@ const DOT_VERSION_PROVIDERS = new Set(["kr", "kiro"]);
 
 // Find a registry entry by id. For Kiro models, tolerates dash/dot version separators
 // ("claude-sonnet-4-5" ~= "claude-sonnet-4.5"). Other providers use exact match only.
+// The raw id wins over the "(level)"-stripped one: Codex virtual aliases such as
+// `gpt-6-sol-ultra-(fast)` are registered verbatim and would otherwise be reduced to
+// `gpt-6-sol-ultra-` and never match.
 function findModel(models, modelId, aliasOrId) {
   if (!models) return undefined;
-  const baseModelId = typeof modelId === "string"
+  const strippedId = typeof modelId === "string"
     ? modelId.replace(/\([^()]+\)\s*$/, "").trim()
     : modelId;
-  const found = models.find(m => m.id === modelId || m.id === baseModelId);
+  const found = models.find(m => m.id === modelId) || models.find(m => m.id === strippedId);
   if (found) return found;
   if (!DOT_VERSION_PROVIDERS.has(aliasOrId)) return undefined;
-  const normalized = normalizeModelId(baseModelId);
-  if (normalized === baseModelId) return undefined;
+  const normalized = normalizeModelId(strippedId);
+  if (normalized === strippedId) return undefined;
   return models.find(m => m.id === normalized);
 }
 
@@ -92,13 +95,27 @@ export function getModelMeta(aliasOrId, modelId) {
   return findModel(PROVIDER_MODELS[aliasOrId], modelId, aliasOrId) || null;
 }
 
+// Exact registry hit by literal id, no suffix stripping.
+function findModelExact(models, modelId) {
+  if (!models || typeof modelId !== "string") return undefined;
+  return models.find(m => m.id === modelId);
+}
+
 export function getModelUpstreamId(aliasOrId, modelId, clientBody = null) {
-  // Split off thinking suffix "(level)" so lookup hits the base id; re-append it to
-  // the result so downstream applyThinking still sees the suffix (body.model is stripped separately).
+  const models = PROVIDER_MODELS[aliasOrId];
+  // A literal registry hit wins and is returned verbatim: Codex virtual aliases such
+  // as `gpt-6-sol-ultra-(fast)` are registered as their own ids, and their trailing
+  // parentheses are part of the alias name — re-appending them would leak a virtual
+  // marker into the upstream slug.
+  const exact = findModelExact(models, modelId);
+  if (exact) return exact.upstreamModelId || exact.id;
+
+  // Otherwise treat a trailing "(level)" as the shared thinking suffix: look the
+  // base id up and re-append the suffix so downstream applyThinking still sees it
+  // (body.model is stripped separately).
   const sufMatch = typeof modelId === "string" ? modelId.match(/\([^()]+\)\s*$/) : null;
   const suffix = sufMatch ? sufMatch[0] : "";
   const baseId = suffix ? modelId.slice(0, sufMatch.index).trim() : modelId;
-  const models = PROVIDER_MODELS[aliasOrId];
 
   // Resolve requested thinking level from suffix or client request body
   const rawSuffix = suffix ? suffix.slice(1, -1).trim().toLowerCase() : "";
@@ -118,16 +135,13 @@ export function getModelUpstreamId(aliasOrId, modelId, clientBody = null) {
 
   // Look for tiered variant first if a tier was requested (e.g. gemini-3.8-flash-high)
   const tieredId = tier ? `${baseId}-${tier}` : null;
-  const found = (tieredId && findModel(models, tieredId, aliasOrId)) || findModel(models, baseId, aliasOrId);
+  const found = (tieredId && findModel(models, tieredId, aliasOrId)) || (suffix ? findModel(models, baseId, aliasOrId) : undefined);
   const resolvedId = found?.upstreamModelId || found?.id;
   if (resolvedId) {
     const presetMatch = resolvedId.match(/\([^()]+\)\s*$/);
     const presetSuffix = presetMatch?.[0] || "";
     const resolvedBase = presetSuffix ? resolvedId.slice(0, presetMatch.index).trim() : resolvedId;
     return resolvedBase + (suffix || (presetSuffix && tier ? `(${tier})` : presetSuffix));
-  }
-  if (aliasOrId === "cx" && typeof baseId === "string" && baseId.endsWith(CODEX_REVIEW_SUFFIX)) {
-    return baseId.slice(0, -CODEX_REVIEW_SUFFIX.length) + suffix;
   }
   return baseId + suffix;
 }
@@ -155,6 +169,15 @@ export const PROVIDER_ID_TO_ALIAS = Object.fromEntries(
 export function getModelsByProviderId(providerId) {
   const alias = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
   return PROVIDER_MODELS[alias] || [];
+}
+
+/**
+ * Public model list for a provider: the registry minus internal-only entries.
+ * Use this for anything a client or the dashboard can pick from; use
+ * getModelsByProviderId() when every routable id is needed.
+ */
+export function getPublicModelsByProviderId(providerId) {
+  return getModelsByProviderId(providerId).filter((model) => !modelIsInternal(model));
 }
 
 // Get strip list for a model entry (explicit opt-in only)
