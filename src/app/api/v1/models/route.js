@@ -1,4 +1,5 @@
 import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS, getModelKind } from "@/shared/constants/models";
+import { modelIsInternal } from "open-sse/providers/models/schema.js";
 import {
   ALIAS_TO_ID,
   AI_PROVIDERS,
@@ -424,6 +425,7 @@ export async function buildModelsList(kindFilter, options = {}) {
       const providerId = ALIAS_TO_PROVIDER_ID[alias] || alias;
       if (!providerMatchesKinds(providerId, kindFilter)) continue;
       for (const model of providerModels) {
+        if (modelIsInternal(model)) continue;
         if (!kindFilter.includes(modelKind(model))) continue;
         if (isDisabled(alias, model.id)) continue;
         models.push({
@@ -463,7 +465,9 @@ export async function buildModelsList(kindFilter, options = {}) {
         || getProviderAlias(providerId)
         || staticAlias
       ).trim();
-      const providerModels = PROVIDER_MODELS[staticAlias] || [];
+      // Internal-only entries (e.g. Codex `codex-auto-review`) stay routable but
+      // must not be advertised as selectable models.
+      const providerModels = (PROVIDER_MODELS[staticAlias] || []).filter((model) => !modelIsInternal(model));
       const isNewApiProviderPool = isNewApiConnection(conn);
       // Per-account model access is a union across the provider's active accounts:
       // a model stays visible while at least one account can serve it, and an

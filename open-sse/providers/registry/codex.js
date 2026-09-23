@@ -1,9 +1,10 @@
-import { withCodexReviewModels } from "../models/helpers.js";
-
-// Codex CLI version seen by OpenAI's backend — single source for the Version /
-// User-Agent identity headers. Bump when the installed codex CLI is upgraded.
-const CODEX_CLI_VERSION = "0.159.0";
-const GPT_6_LITE_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+import {
+  CODEX_CLI_VERSION,
+  CODEX_MODEL_CAPABILITIES,
+  CODEX_INTERNAL_MODEL_CAPABILITIES,
+  CODEX_FAST_SUFFIX,
+  CODEX_EXTENDED_CONTEXT_WINDOW,
+} from "../../config/codexModels.js";
 
 export default {
   id: "codex",
@@ -52,32 +53,62 @@ export default {
     },
   },
   models: [
-    { id: "gpt-6.1-sol", name: "GPT 6.1 Sol", responsesLite: true, thinkingLevels: GPT_6_LITE_THINKING_LEVELS },
-    { id: "gpt-6-astra", name: "GPT 6.0 Astra" },
-    { id: "gpt-6-astra[1m]", name: "GPT 6.0 Astra (extended context)", upstreamModelId: "gpt-6-astra" },
-    { id: "gpt-6-sol", name: "GPT 6.0 Sol", responsesLite: true, thinkingLevels: GPT_6_LITE_THINKING_LEVELS },
-    { id: "gpt-6-sol[1m]", name: "GPT 6.0 Sol (extended context)", upstreamModelId: "gpt-6-sol", responsesLite: true, thinkingLevels: GPT_6_LITE_THINKING_LEVELS },
-    { id: "gpt-6-luna", name: "GPT 6.0 Luna", responsesLite: true, thinkingLevels: GPT_6_LITE_THINKING_LEVELS },
-    { id: "gpt-6-luna[1m]", name: "GPT 6.0 Luna (extended context)", upstreamModelId: "gpt-6-luna", responsesLite: true, thinkingLevels: GPT_6_LITE_THINKING_LEVELS },
-    { id: "gpt-5.6-sol", name: "GPT 5.6 Sol" },
-    { id: "gpt-5.6-sol[1m]", name: "GPT 5.6 Sol (extended context)", upstreamModelId: "gpt-5.6-sol" },
-    { id: "gpt-5.6-sol-review", name: "GPT 5.6 Sol Review", upstreamModelId: "gpt-5.6-sol", quotaFamily: "review" },
-    { id: "gpt-5.6-terra", name: "GPT 5.6 Terra" },
-    { id: "gpt-5.6-terra[1m]", name: "GPT 5.6 Terra (extended context)", upstreamModelId: "gpt-5.6-terra" },
-    { id: "gpt-5.6-terra-review", name: "GPT 5.6 Terra Review", upstreamModelId: "gpt-5.6-terra", quotaFamily: "review" },
-    { id: "gpt-5.6-luna", name: "GPT 5.6 Luna" },
-    { id: "gpt-5.6-luna[1m]", name: "GPT 5.6 Luna (extended context)", upstreamModelId: "gpt-5.6-luna" },
-    { id: "gpt-5.6-luna-review", name: "GPT 5.6 Luna Review", upstreamModelId: "gpt-5.6-luna", quotaFamily: "review" },
-    { id: "gpt-5.5", name: "GPT 5.5" },
-    { id: "gpt-5.5-review", name: "GPT 5.5 Review", upstreamModelId: "gpt-5.5", quotaFamily: "review" },
-    // gpt-5.4 / gpt-5.4-mini / gpt-5.3-codex-spark removed: absent from backend-api/codex/models
-    // for ChatGPT Plus/Pro accounts and return HTTP 400 "model is not supported" (#4202).
-    // gpt-daybreak-blue-latest and gpt-reserve added: confirmed live via backend-api/codex/models (#4202).
-    { id: "gpt-daybreak-blue-latest", name: "GPT Daybreak Blue" },
-    { id: "gpt-reserve", name: "GPT Reserve" },
-    // Codex CLI's auto-review virtual model. Unlike the "-review" variants above it is not derived
-    // from a base model, so it is forwarded verbatim instead of having "-review" stripped (#1398).
-    { id: "codex-auto-review", name: "Codex Auto Review", upstreamModelId: "codex-auto-review", quotaFamily: "review" },
+    // Public chat models come from the official Codex catalog (visibility "list"
+    // + supported_in_api) via the shared capability map, so the registry, the
+    // reasoning picker and alias validation cannot drift. Virtual aliases
+    // (`<base>-<effort>`, `<base>-(fast)`) are generated from the same map and
+    // resolved back to the canonical slug by the Codex executor.
+    ...Object.entries(CODEX_MODEL_CAPABILITIES).flatMap(([base, caps]) => {
+      const canonical = {
+        id: base,
+        name: caps.name,
+        contextLength: caps.contextWindow,
+        // Consumed by the executor (isCodexResponsesLiteModel) to pick the
+        // Codex 0.155 wire shape; must be emitted or those models regress.
+        ...(caps.responsesLite ? { responsesLite: true } : {}),
+      };
+      const aliases = [];
+      // Extended-context variant: the official catalog serves the same weights
+      // with an 872k window under `<base>[1m]`, so it maps back to the base id.
+      if (caps.extendedContext) {
+        aliases.push({
+          id: `${base}[1m]`,
+          name: `${caps.name} (extended context)`,
+          upstreamModelId: base,
+          contextLength: CODEX_EXTENDED_CONTEXT_WINDOW,
+          ...(caps.responsesLite ? { responsesLite: true } : {}),
+        });
+      }
+      if (caps.fast) {
+        aliases.push({ id: `${base}${CODEX_FAST_SUFFIX}`, name: `${caps.name} (Fast)`, upstreamModelId: base, serviceTier: "fast" });
+      }
+      for (const effort of caps.reasoning) {
+        aliases.push({ id: `${base}-${effort}`, name: `${caps.name} ${effort}`, upstreamModelId: base, reasoningEffort: effort });
+        if (caps.fast) {
+          aliases.push({
+            id: `${base}-${effort}${CODEX_FAST_SUFFIX}`,
+            name: `${caps.name} ${effort} (Fast)`,
+            upstreamModelId: base,
+            reasoningEffort: effort,
+            serviceTier: "fast",
+          });
+        }
+      }
+      return [canonical, ...aliases];
+    }),
+    // Official catalog entry with `visibility: "hide"` — kept routable because
+    // Codex CLI sends the bare id for its automatic approval review, but never
+    // part of a public model list (`internal: true` is filtered by the listing
+    // surfaces). See CODEX_INTERNAL_MODEL_CAPABILITIES.
+    ...Object.entries(CODEX_INTERNAL_MODEL_CAPABILITIES).map(([id, caps]) => ({
+      id,
+      name: caps.name,
+      contextLength: caps.contextWindow,
+      internal: true,
+      // Auto-review draws on the review quota bucket upstream, so the internal
+      // quota-family marker stays even though the id is no longer a public model.
+      quotaFamily: "review",
+    })),
     { id: "gpt-image-2.5", name: "GPT Image 2.5", capabilities: ["text2img","edit","multiImage"], params: ["size","quality","background","image_detail","output_format"], kind: "image" },
     { id: "gpt-image-2.5-flare", name: "GPT Image 2.5 Flare", capabilities: ["text2img","edit","multiImage"], params: ["size","quality","background","image_detail","output_format"], kind: "image" },
     { id: "gpt-image-2.5-sunburst", name: "GPT Image 2.5 Sunburst", capabilities: ["text2img","edit","multiImage"], params: ["size","quality","background","image_detail","output_format"], kind: "image" },

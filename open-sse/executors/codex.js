@@ -9,6 +9,7 @@ import { normalizeResponsesInput } from "../translator/formats/responsesApi.js";
 import { fetchImageAsBase64 } from "../translator/concerns/image.js";
 import { getModelUpstreamId, getProviderModels } from "../config/providerModels.js";
 import { getThinkingLevels } from "../providers/thinkingLevels.js";
+import { parseCodexModelReference, getCodexDefaultReasoning } from "../config/codexModels.js";
 import { DEFAULT_RETRY_CONFIG, HTTP_STATUS, resolveRetryEntry } from "../config/runtimeConfig.js";
 import { dbg } from "../utils/debugLog.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
@@ -28,6 +29,18 @@ const CODEX_MODEL_CAPACITY_MESSAGE = "Selected model is at capacity. Please try 
 function isCodexResponsesLiteModel(model) {
   const baseId = String(model || "").replace(/\([^()]+\)\s*$/, "");
   return getProviderModels("cx").some((entry) => entry.id === baseId && entry.responsesLite === true);
+}
+
+/**
+ * Raised when a Codex virtual alias names a combination the model does not
+ * support. chatCore converts this into a 400 so the caller gets a clear message
+ * instead of an upstream routing error.
+ */
+export class CodexModelError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "CodexModelError";
+  }
 }
 
 // Server-generated item id prefixes that Codex /responses cannot resolve when store=false
@@ -147,6 +160,21 @@ function normalizeReasoningEffort(model, value) {
   if (value === "ultra" && supportedLevels?.includes("max")) return "max";
   if (value === "max" || value === "ultra") return "xhigh";
   return value;
+}
+
+// Canonicalize a Codex model id and pull the virtual-alias modifiers out of it.
+// A canonical model keeps its official default reasoning; a virtual alias may
+// also carry an explicit effort and/or the Fast service tier.
+function resolveCodexModel(body, fallbackModel) {
+  const raw = body.model || fallbackModel;
+  const parsed = parseCodexModelReference(raw);
+  if (parsed.ok === false) return { error: parsed.reason };
+  return {
+    model: parsed.model,
+    aliasEffort: parsed.reasoningEffort || null,
+    fast: parsed.fast === true,
+    known: parsed.unknown !== true,
+  };
 }
 
 function findNestedMessage(value, depth = 0) {
@@ -474,8 +502,13 @@ export class CodexExecutor extends BaseExecutor {
       body.prompt_cache_key = this._currentSessionId;
     }
 
-    // Map virtual Codex review models to the upstream Codex model before suffix parsing.
-    body.model = upstreamModel;
+    // Resolve virtual Codex aliases and the review family to the canonical
+    // upstream model. This runs before the legacy suffix parsing below so the
+    // alias grammar wins over the generic `-<level>` heuristic.
+    const resolved = resolveCodexModel(body, model);
+    if (resolved.error) throw new CodexModelError(resolved.error);
+    body.model = resolved.model;
+    if (resolved.fast) body.service_tier = "fast";
 
     if (responsesLite) {
       // Codex 0.155 carries tools and instructions as input prefix items.
@@ -502,22 +535,34 @@ export class CodexExecutor extends BaseExecutor {
     // Extract thinking level from model name suffix
     // e.g., gpt-5.3-codex-high → high, gpt-5.3-codex → medium (default)
     const effortLevels = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'];
-    let modelEffort = null;
-    for (const level of effortLevels) {
-      if (body.model.endsWith(`-${level}`)) {
-        modelEffort = level;
-        // Strip suffix from model name for actual API call
-        body.model = body.model.replace(`-${level}`, '');
-        break;
+    let modelEffort = resolved.aliasEffort;
+    if (!modelEffort) {
+      for (const level of effortLevels) {
+        if (body.model.endsWith(`-${level}`)) {
+          modelEffort = level;
+          // Strip suffix from model name for actual API call
+          body.model = body.model.replace(`-${level}`, '');
+          break;
+        }
       }
     }
 
-    // Priority: explicit reasoning.effort > reasoning_effort param > model suffix > default (medium)
+    // Priority: explicit reasoning.effort > reasoning_effort param > alias/suffix
+    // effort > the model's official default. A single global default would make
+    // every model without an explicit override run at that one level, which does
+    // not match the official catalog's per-model default_reasoning_level.
+    const codexDefaultEffort = getCodexDefaultReasoning(body.model);
     if (!body.reasoning) {
-      const effort = normalizeReasoningEffort(body.model, body.reasoning_effort || modelEffort || (responsesLite ? 'medium' : 'low'));
+      const effort = normalizeReasoningEffort(
+        body.model,
+        body.reasoning_effort || modelEffort || codexDefaultEffort || (responsesLite ? 'medium' : 'low')
+      );
       body.reasoning = responsesLite ? { effort } : { effort, summary: "auto" };
     } else {
-      body.reasoning.effort = normalizeReasoningEffort(body.model, body.reasoning.effort);
+      body.reasoning.effort = normalizeReasoningEffort(
+        body.model,
+        body.reasoning.effort || modelEffort || codexDefaultEffort
+      );
       if (!responsesLite && !body.reasoning.summary) body.reasoning.summary = "auto";
     }
     if (responsesLite) body.reasoning.context = "all_turns";

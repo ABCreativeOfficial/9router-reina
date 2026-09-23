@@ -100,12 +100,22 @@ describe("native Codex passthrough thinking suffixes", () => {
     expect(body.reasoning).toEqual({ effort: "max", summary: "detailed" });
   });
 
-  it("forwards Ultra through a Terra review alias", async () => {
-    const body = await runNativeCodexRequest("gpt-5.6-terra-review(ultra)", {
+  it("resolves a virtual alias to its canonical model and marks the Fast tier", async () => {
+    const body = await runNativeCodexRequest("gpt-5.6-terra-ultra-(fast)");
+
+    // This suite mocks the executor, so it asserts the chatCore layer: the alias
+    // is canonicalized before dispatch and its Fast marker becomes the internal
+    // service tier ("fast"), which the executor maps to upstream "priority".
+    expect(body.model).toBe("gpt-5.6-terra");
+    expect(body.service_tier).toBe("fast");
+  });
+
+  it("lets an explicit reasoning.effort win over the alias effort", async () => {
+    const body = await runNativeCodexRequest("gpt-5.6-terra-ultra-(fast)", {
       effort: "low",
     });
 
     expect(body.model).toBe("gpt-5.6-terra");
-    expect(body.reasoning).toEqual({ effort: "ultra" });
+    expect(body.reasoning).toEqual({ effort: "low" });
   });
 });

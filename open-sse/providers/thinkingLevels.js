@@ -3,7 +3,7 @@
 import { getCapabilitiesForModel } from "./capabilities.js";
 import { matchPattern } from "./pricing.js";
 import { resolveKiroEffortPath } from "../config/kiroConstants.js";
-import { getProviderModels } from "../config/providerModels.js";
+import { getCodexModelCapabilities, matchCodexBaseModel } from "../config/codexModels.js";
 
 // Shared level sets (deduped) — verified against provider docs + wire in thinkingUnified.applyFormat.
 const L = {
@@ -33,19 +33,16 @@ const FORMAT_LEVELS = {
   step: L.base,
 };
 
-const CODEX_GPT_5_6_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-
 // Opus/Sonnet 4.6 lack xhigh (Anthropic + Kiro docs) — keep the 4-level+max set.
 const CLAUDE_NO_XHIGH = ["none", "low", "medium", "high", "max"];
 
 // Model-name pattern overrides (glob, first match wins) — more precise than format default.
+// Codex has no entry here: its reasoning sets are per model in the official
+// catalog (Luna stops at `max`, GPT-5.5 at `xhigh`), resolved from the shared
+// capability map in open-sse/config/codexModels.js below.
 const PATTERN_THINKING = [
   { pattern: "*claude*4.6*", levels: CLAUDE_NO_XHIGH },
   { pattern: "*claude*4-6*", levels: CLAUDE_NO_XHIGH },
-  { provider: "codex", pattern: "*gpt-6*", levels: CODEX_GPT_5_6_LEVELS },
-  { provider: "codex", pattern: "*gpt-5.6-sol*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
-  { provider: "codex", pattern: "*gpt-5.6-terra*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
-  { provider: "codex", pattern: "*gpt-5.6-luna*", levels: CODEX_GPT_5_6_LEVELS },
   { pattern: "*codex*", levels: ["low", "medium", "high", "xhigh"] }, // codex cannot disable thinking
   { pattern: "*mimo*v2.6*", levels: ["none", "low", "medium", "high", "xhigh"] },
   // mimo-v2.5-pro on opencode-go rejects reasoning_effort "max" (probed live); v2.5 accepts it.
@@ -73,16 +70,22 @@ const PATTERN_THINKING = [
 // Returns valid thinking levels for a model, or null when the model has no reasoning.
 export function getThinkingLevels(provider, model) {
   if (provider === "kiro" && resolveKiroEffortPath(model) === null) return null;
+  // Codex reasoning sets are per model in the official catalog (Luna stops at
+  // `max`, GPT-5.5 at `xhigh`), so they come from the shared capability map
+  // instead of a broad family pattern that would flatten them together.
+  if (provider === "codex") {
+    const codexMatch = matchCodexBaseModel(
+      typeof model === "string" ? model.replace(/\([^()]+\)\s*$/, "").trim() : model
+    );
+    const codexCaps = codexMatch ? getCodexModelCapabilities(codexMatch.base) : null;
+    if (codexCaps) return ["none", "minimal", ...codexCaps.reasoning];
+  }
   const caps = getCapabilitiesForModel(provider, model);
   if (!caps.reasoning) return null;
-  const baseId = String(model || "").replace(/\([^()]+\)\s*$/, "");
-  const modelLevels = provider === "codex"
-    ? getProviderModels("cx").find((entry) => entry.id === baseId)?.thinkingLevels
-    : null;
   const hit = PATTERN_THINKING.find((entry) =>
     (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
   );
-  let levels = modelLevels || hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
+  let levels = hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
   if (caps.thinkingCanDisable === false) levels = levels.filter((l) => l !== "none");
   return levels;
 }
