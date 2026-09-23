@@ -14,14 +14,15 @@ import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveClineModels, resolveClinepassModels } from "open-sse/services/clinepassModels.js";
 import { resolveNewApiConnectionModels } from "@/sse/services/newApiModels";
+import { CODEX_CLI_VERSION } from "open-sse/config/codexModels.js";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
 
 // The /codex/models endpoint gates each entry by minimal_client_version against this
 // value, and codex CLI's own manifest (openai/codex codex-rs/models-manager/models.json)
-// already requires 0.144.0 for its newest models, so a stale client_version here comes
+// already requires 0.155.0 for its newest models, so a stale client_version here comes
 // back 200 with those entries quietly missing instead of erroring.
-const CODEX_CLIENT_VERSION = "0.144.6";
+const CODEX_CLIENT_VERSION = CODEX_CLI_VERSION;
 const CODEX_MODELS_URL = `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`;
 
 const parseOpenAIStyleModels = (data) => {
@@ -52,26 +53,15 @@ const parseGeminiCliModels = (data) => {
   return [];
 };
 
-const appendCodexReviewModels = (models) => models.flatMap((model) => {
+// Codex used to synthesize a `<model>-review` sibling for every chat model. Those
+// ids are not official Codex models, so they are no longer generated or exposed;
+// the live list mirrors upstream as-is. `codex-auto-review` is a real (hidden)
+// official entry and comes back from the endpoint on its own.
+const parseCodexModels = (data) => parseOpenAIStyleModels(data).flatMap((model) => {
   const id = model?.id || model?.slug || model?.model || model?.name;
   if (!id) return [];
-  const name = model?.display_name || model?.displayName || model?.name || id;
-  const normalized = { ...model, id, name };
-  const isChatModel = (model?.type || "llm") !== "image" && !id.toLowerCase().includes("embed");
-  if (!isChatModel || id.endsWith("-review")) return [normalized];
-  return [
-    normalized,
-    {
-      ...normalized,
-      id: `${id}-review`,
-      name: `${name} Review`,
-      upstreamModelId: id,
-      quotaFamily: "review",
-    },
-  ];
+  return [{ ...model, id, name: model?.display_name || model?.displayName || model?.name || id }];
 });
-
-const parseCodexModels = (data) => appendCodexReviewModels(parseOpenAIStyleModels(data));
 
 const createOpenAIModelsConfig = (url) => ({
   url,

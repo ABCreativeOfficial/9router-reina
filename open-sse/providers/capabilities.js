@@ -149,10 +149,9 @@ export const MODEL_CAPABILITIES = {
 
 const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
 
-// Codex OAuth (ChatGPT backend) — per-model context window reported by upstream
-// (lower than OpenAI API's 1.05M). Sol differs from Terra/Luna. #2720
-const CODEX_GPT_56_SOL_CAPS  = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 372000, maxOutput: 128000 };
-const CODEX_GPT_56_DEFAULT_CAPS = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
+// Codex OAuth (ChatGPT backend) per-model limits live in open-sse/config/codexModels.js
+// (the official catalog's context_window/max_context_window); the entries below only
+// declare shape. Keep the two in sync when the official catalog changes.
 
 /**
  * Provider-specific capability overrides. Keyed by provider alias/id.
@@ -175,12 +174,15 @@ export const PROVIDER_CAPABILITIES = {
   },
   "codex": {
     "gpt-6-astra":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
-    "gpt-5.6-sol":               CODEX_GPT_56_SOL_CAPS,
-    "gpt-5.6-sol-review":        CODEX_GPT_56_SOL_CAPS,
-    "gpt-5.6-terra":             CODEX_GPT_56_DEFAULT_CAPS,
-    "gpt-5.6-terra-review":      CODEX_GPT_56_DEFAULT_CAPS,
-    "gpt-5.6-luna":              CODEX_GPT_56_DEFAULT_CAPS,
-    "gpt-5.6-luna-review":       CODEX_GPT_56_DEFAULT_CAPS,
+    "gpt-6-sol":                 { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-6-luna":                { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-5.6-sol":               { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-5.6-terra":             { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-5.6-luna":              { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    "gpt-5.5":                   { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
+    // Official catalog marks this `visibility: "hide"`; kept so the bare id Codex
+    // CLI sends for auto-review resolves with real limits instead of the floor.
+    "codex-auto-review":         { vision: false, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
   },
   "kiro": {
     "gpt-5.6-sol": KIRO_GPT_5_6_CAPABILITIES,

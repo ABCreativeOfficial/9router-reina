@@ -1,8 +1,9 @@
-import { withCodexReviewModels } from "../models/helpers.js";
-
-// Codex CLI version seen by OpenAI's backend — single source for the Version /
-// User-Agent identity headers. Bump when the installed codex CLI is upgraded.
-const CODEX_CLI_VERSION = "0.154.0";
+import {
+  CODEX_CLI_VERSION,
+  CODEX_MODEL_CAPABILITIES,
+  CODEX_INTERNAL_MODEL_CAPABILITIES,
+  CODEX_FAST_SUFFIX,
+} from "../../config/codexModels.js";
 
 export default {
   id: "codex",
@@ -50,24 +51,44 @@ export default {
     },
   },
   models: [
-    { id: "gpt-6-astra", name: "GPT 6.0 Astra" },
-    { id: "gpt-5.6-sol", name: "GPT 5.6 Sol" },
-    { id: "gpt-5.6-sol-review", name: "GPT 5.6 Sol Review", upstreamModelId: "gpt-5.6-sol", quotaFamily: "review" },
-    { id: "gpt-5.6-terra", name: "GPT 5.6 Terra" },
-    { id: "gpt-5.6-terra-review", name: "GPT 5.6 Terra Review", upstreamModelId: "gpt-5.6-terra", quotaFamily: "review" },
-    { id: "gpt-5.6-luna", name: "GPT 5.6 Luna" },
-    { id: "gpt-5.6-luna-review", name: "GPT 5.6 Luna Review", upstreamModelId: "gpt-5.6-luna", quotaFamily: "review" },
-    { id: "gpt-5.5", name: "GPT 5.5" },
-    { id: "gpt-5.5-review", name: "GPT 5.5 Review", upstreamModelId: "gpt-5.5", quotaFamily: "review" },
-    { id: "gpt-5.4", name: "GPT 5.4" },
-    { id: "gpt-5.4-review", name: "GPT 5.4 Review", upstreamModelId: "gpt-5.4", quotaFamily: "review" },
-    { id: "gpt-5.4-mini", name: "GPT 5.4 Mini" },
-    { id: "gpt-5.4-mini-review", name: "GPT 5.4 Mini Review", upstreamModelId: "gpt-5.4-mini", quotaFamily: "review" },
-    { id: "gpt-5.3-codex-spark", name: "GPT 5.3 Codex Spark" },
-    { id: "gpt-5.3-codex-spark-review", name: "GPT 5.3 Codex Spark Review", upstreamModelId: "gpt-5.3-codex-spark", quotaFamily: "review" },
-    // Codex CLI's auto-review virtual model. Unlike the "-review" variants above it is not derived
-    // from a base model, so it is forwarded verbatim instead of having "-review" stripped (#1398).
-    { id: "codex-auto-review", name: "Codex Auto Review", upstreamModelId: "codex-auto-review", quotaFamily: "review" },
+    // Public chat models come from the official Codex catalog (visibility "list"
+    // + supported_in_api) via the shared capability map, so the registry, the
+    // reasoning picker and alias validation cannot drift. Virtual aliases
+    // (`<base>-<effort>`, `<base>-(fast)`) are generated from the same map and
+    // resolved back to the canonical slug by the Codex executor.
+    ...Object.entries(CODEX_MODEL_CAPABILITIES).flatMap(([base, caps]) => {
+      const canonical = { id: base, name: caps.name, contextLength: caps.contextWindow };
+      const aliases = [];
+      if (caps.fast) {
+        aliases.push({ id: `${base}${CODEX_FAST_SUFFIX}`, name: `${caps.name} (Fast)`, upstreamModelId: base, serviceTier: "fast" });
+      }
+      for (const effort of caps.reasoning) {
+        aliases.push({ id: `${base}-${effort}`, name: `${caps.name} ${effort}`, upstreamModelId: base, reasoningEffort: effort });
+        if (caps.fast) {
+          aliases.push({
+            id: `${base}-${effort}${CODEX_FAST_SUFFIX}`,
+            name: `${caps.name} ${effort} (Fast)`,
+            upstreamModelId: base,
+            reasoningEffort: effort,
+            serviceTier: "fast",
+          });
+        }
+      }
+      return [canonical, ...aliases];
+    }),
+    // Official catalog entry with `visibility: "hide"` — kept routable because
+    // Codex CLI sends the bare id for its automatic approval review, but never
+    // part of a public model list (`internal: true` is filtered by the listing
+    // surfaces). See CODEX_INTERNAL_MODEL_CAPABILITIES.
+    ...Object.entries(CODEX_INTERNAL_MODEL_CAPABILITIES).map(([id, caps]) => ({
+      id,
+      name: caps.name,
+      contextLength: caps.contextWindow,
+      internal: true,
+      // Auto-review draws on the review quota bucket upstream, so the internal
+      // quota-family marker stays even though the id is no longer a public model.
+      quotaFamily: "review",
+    })),
     { id: "gpt-image-2.5", name: "GPT Image 2.5", capabilities: ["text2img","edit","multiImage"], params: ["size","quality","background","image_detail","output_format"], kind: "image" },
     { id: "gpt-image-2.5-flare", name: "GPT Image 2.5 Flare", capabilities: ["text2img","edit","multiImage"], params: ["size","quality","background","image_detail","output_format"], kind: "image" },
     { id: "gpt-image-2.5-sunburst", name: "GPT Image 2.5 Sunburst", capabilities: ["text2img","edit","multiImage"], params: ["size","quality","background","image_detail","output_format"], kind: "image" },

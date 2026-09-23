@@ -1,6 +1,7 @@
 import { detectFormat, getTargetFormat, resolveTransport } from "../services/provider.js";
 import { translateRequest } from "../translator/index.js";
 import { applyThinking, extractThinking, stripThinkingSuffix } from "../translator/concerns/thinkingUnified.js";
+import { parseCodexModelReference, getCodexDefaultReasoning } from "../config/codexModels.js";
 import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
 import { createStreamController } from "../utils/streamHandler.js";
@@ -62,6 +63,28 @@ export function stripContinuityFields(body) {
 export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking }) {
   const { provider, model } = modelInfo;
   const requestStartTime = Date.now();
+
+  // Codex virtual aliases (`<base>-<effort>`, `<base>-(fast)`) are resolved here,
+  // before any translation, so every downstream stage — translation, executor,
+  // logging — sees the canonical model. An unsupported combination fails with a
+  // clear 400 instead of being silently clamped or leaked upstream.
+  const codexAlias = provider === "codex" ? parseCodexModelReference(model) : null;
+  if (codexAlias && codexAlias.ok === false) {
+    return createErrorResult(HTTP_STATUS.BAD_REQUEST, codexAlias.reason);
+  }
+  // The alias's Fast marker is the request's service tier; an explicit body
+  // value still wins (official precedence), so this only fills the gap.
+  if (codexAlias?.fast && body && typeof body === "object" && body.service_tier === undefined) {
+    body.service_tier = "fast";
+  }
+  // Reasoning precedence: explicit body value > alias effort > per-model official
+  // default. Handled in the Codex executor, which is the only stage that owns
+  // the Responses-API reasoning shape.
+  if (codexAlias?.reasoningEffort && body && typeof body === "object"
+    && body.reasoning_effort === undefined
+    && !(body.reasoning && typeof body.reasoning === "object" && body.reasoning.effort !== undefined)) {
+    body.reasoning_effort = codexAlias.reasoningEffort;
+  }
   // Stable per-session color so all lines of one CLI conversation share a tag
   const sessionSeed = (() => {
     try {
@@ -394,6 +417,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     reqLogger.logTargetRequest(providerUrl, providerHeaders, finalBody);
   } catch (error) {
     trackPendingRequest(model, provider, connectionId, false, true);
+    if (error.name === "CodexModelError") {
+      return createErrorResult(HTTP_STATUS.BAD_REQUEST, error.message);
+    }
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${error.name === "AbortError" ? 499 : HTTP_STATUS.BAD_GATEWAY}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
       provider, model, connectionId,
