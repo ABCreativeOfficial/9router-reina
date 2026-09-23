@@ -46,3 +46,10 @@ export function modelTargetFormat(model) {
 export function modelSupportedFormats(model) {
   return model?.supportedFormats || null;
 }
+
+// Internal-only entries stay routable but must never appear in a public model
+// list (e.g. Codex `codex-auto-review`, which the official catalog ships with
+// `visibility: "hide"` yet Codex CLI requests by its bare id).
+export function modelIsInternal(model) {
+  return model?.internal === true;
+}
