@@ -4,6 +4,7 @@ import { getCapabilitiesForModel } from "./capabilities.js";
 import { matchPattern } from "./pricing.js";
 import { resolveKiroEffortPath } from "../config/kiroConstants.js";
 import { getProviderModels } from "../config/providerModels.js";
+import { getCodexModelCapabilities, matchCodexBaseModel } from "../config/codexModels.js";
 
 // Shared level sets (deduped) — verified against provider docs + wire in thinkingUnified.applyFormat.
 const L = {
@@ -34,13 +35,14 @@ const FORMAT_LEVELS = {
   nous: L.base,
 };
 
-const CODEX_GPT_5_6_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
-
 // Opus/Sonnet 4.6 lack xhigh (Anthropic + Kiro docs) — keep the 4-level+max set.
 const CLAUDE_NO_XHIGH = ["none", "low", "medium", "high", "max"];
 
 const AG_CLAUDE_5_5_LEVELS = ["low", "medium", "high", "max"];
 // Model-name pattern overrides (glob, first match wins) — more precise than format default.
+// Codex has no entry here: its reasoning sets are per model in the official
+// catalog (Luna stops at `max`, GPT-5.5 at `xhigh`), resolved from the shared
+// capability map in open-sse/config/codexModels.js below.
 const PATTERN_THINKING = [
   // Gemini 4 Neon & Hydrogen support xhigh in addition to low/medium/high (no minimal/none).
   { pattern: "*gemini-4-neon*", levels: ["low", "medium", "high", "xhigh"] },
@@ -54,10 +56,6 @@ const PATTERN_THINKING = [
   { provider: "antigravity", pattern: "*claude*opus-5.5*", levels: AG_CLAUDE_5_5_LEVELS },
   { pattern: "*claude*4.6*", levels: CLAUDE_NO_XHIGH },
   { pattern: "*claude*4-6*", levels: CLAUDE_NO_XHIGH },
-  { provider: "codex", pattern: "*gpt-6*", levels: CODEX_GPT_5_6_LEVELS },
-  { provider: "codex", pattern: "*gpt-5.6-sol*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
-  { provider: "codex", pattern: "*gpt-5.6-terra*", levels: [...CODEX_GPT_5_6_LEVELS, "ultra"] },
-  { provider: "codex", pattern: "*gpt-5.6-luna*", levels: CODEX_GPT_5_6_LEVELS },
   { pattern: "*codex*", levels: ["low", "medium", "high", "xhigh"] }, // codex cannot disable thinking
   // OpenCode Free (oc) MiMo rides the same OpenRouter-backed route as the rest of
   // that lane and takes the full OpenAI effort enum verbatim (probed live: all
@@ -112,6 +110,7 @@ const PATTERN_THINKING = [
 // OpenAI documents reasoning.effort "max" for GPT-5.6 and GPT-6 (#5186). The codex rows
 // above already carry it; an OpenAI Compatible node serving the same ids gets the same
 // set, otherwise the "openai" format list (no max) clamps max to xhigh on the wire.
+const CODEX_GPT_5_6_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 const OPENAI_MAX_EFFORT_MODEL = /(?:^|\/)gpt-(?:5\.6|6)(?:[.-]|$)/i;
 const isOpenAICompatibleNode = (provider) => String(provider || "").startsWith("openai-compatible-");
 
@@ -119,15 +118,24 @@ const isOpenAICompatibleNode = (provider) => String(provider || "").startsWith("
 export function getThinkingLevels(provider, model) {
   const normalizedProvider = provider === "ag" ? "antigravity" : provider;
   if (normalizedProvider === "kiro" && resolveKiroEffortPath(model) === null) return null;
+  // Codex reasoning sets are per model in the official catalog, so they win over
+  // any family pattern; the alias prefix ("cx/") and a "(level)" suffix are stripped first.
+  if (normalizedProvider === "codex") {
+    const codexMatch = matchCodexBaseModel(
+      typeof model === "string" ? model.replace(/\([^()]+\)\s*$/, "").trim() : model
+    );
+    const codexCaps = codexMatch ? getCodexModelCapabilities(codexMatch.base) : null;
+    if (codexCaps) return ["none", "minimal", ...codexCaps.reasoning];
+  }
   const caps = getCapabilitiesForModel(normalizedProvider, model);
   if (!caps.reasoning) return null;
   const baseId = String(model || "").replace(/\([^()]+\)\s*$/, "");
-  const modelLevels = normalizedProvider === "codex"
-    ? getProviderModels("cx").find((entry) => entry.id === baseId)?.thinkingLevels
-    : null;
   const hit = PATTERN_THINKING.find((entry) =>
     (!entry.provider || entry.provider === normalizedProvider) && matchPattern(entry.pattern, model)
   );
+  const modelLevels = normalizedProvider === "codex"
+    ? getProviderModels("cx").find((entry) => entry.id === baseId)?.thinkingLevels
+    : null;
   let levels = modelLevels || hit?.levels
     || (isOpenAICompatibleNode(normalizedProvider) && OPENAI_MAX_EFFORT_MODEL.test(baseId) ? CODEX_GPT_5_6_LEVELS : null)
     || FORMAT_LEVELS[caps.thinkingFormat] || L.base;

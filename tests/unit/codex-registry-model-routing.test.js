@@ -15,12 +15,25 @@
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
+import codexRegistry from "../../open-sse/providers/registry/codex.js";
 
 // ── #4202 Registry checks ────────────────────────────────────────────────────
 
 const codexSrc = fs.readFileSync(
   path.resolve("../open-sse/providers/registry/codex.js"),
   "utf-8"
+);
+
+// This fork's single source of truth for the Codex model set is
+// open-sse/config/codexModels.js; the registry only holds the generator. Assert
+// against the catalog plus the ids the registry actually emits, which is stronger
+// than matching literal text in one file.
+const catalogSrc = fs.readFileSync(
+  path.resolve("../open-sse/config/codexModels.js"),
+  "utf-8"
+);
+const codexModelIds = new Set(
+  (codexRegistry.models || codexRegistry.default?.models || []).map((model) => model.id)
 );
 
 describe("Codex registry — ghost models removed (#4202)", () => {
@@ -56,25 +69,30 @@ describe("Codex registry — ghost models removed (#4202)", () => {
 
 describe("Codex registry — new models added (#4202)", () => {
   it("gpt-daybreak-blue-latest is present", () => {
-    expect(codexSrc).toContain('"gpt-daybreak-blue-latest"');
+    expect(catalogSrc).toContain('"gpt-daybreak-blue-latest"');
+      expect(codexModelIds.has("gpt-daybreak-blue-latest")).toBe(true);
   });
 
   it("gpt-reserve is present", () => {
-    expect(codexSrc).toContain('"gpt-reserve"');
+    expect(catalogSrc).toContain('"gpt-reserve"');
+      expect(codexModelIds.has("gpt-reserve")).toBe(true);
   });
 });
 
 describe("Codex registry — still-live models kept (#4202 regression guard)", () => {
   it("gpt-5.6-sol still present", () => {
-    expect(codexSrc).toContain('"gpt-5.6-sol"');
+    expect(catalogSrc).toContain('"gpt-5.6-sol"');
+      expect(codexModelIds.has("gpt-5.6-sol")).toBe(true);
   });
 
   it("gpt-5.6-terra still present", () => {
-    expect(codexSrc).toContain('"gpt-5.6-terra"');
+    expect(catalogSrc).toContain('"gpt-5.6-terra"');
+      expect(codexModelIds.has("gpt-5.6-terra")).toBe(true);
   });
 
   it("gpt-6-astra still present", () => {
-    expect(codexSrc).toContain('"gpt-6-astra"');
+    expect(catalogSrc).toContain('"gpt-6-astra"');
+      expect(codexModelIds.has("gpt-6-astra")).toBe(true);
   });
 });
 

@@ -88,14 +88,14 @@ describe("Codex reasoning normalization", () => {
     expect(body.reasoning.effort).toBe(expected);
   });
 
-  it("resolves review models before applying the reasoning matrix", () => {
-    const body = new CodexExecutor().transformRequest("gpt-5.6-terra-review", {
-      model: "gpt-5.6-terra-review",
+  it("resolves a virtual alias to its canonical model before applying the reasoning matrix", () => {
+    const body = new CodexExecutor().transformRequest("gpt-5.6-terra-ultra-(fast)", {
+      model: "gpt-5.6-terra-ultra-(fast)",
       input: "hi",
-      reasoning_effort: "ultra",
     }, true, {});
 
     expect(body.model).toBe("gpt-5.6-terra");
     expect(body.reasoning.effort).toBe("ultra");
+    expect(body.service_tier).toBe("priority");
   });
 });
