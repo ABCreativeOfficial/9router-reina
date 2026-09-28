@@ -1,3 +1,5 @@
+import { FORMATS } from "../../translator/formats.js";
+
 export function isMuseSparkModel(modelId) {
   if (!modelId || typeof modelId !== "string") return false;
   const clean = modelId.replace(/\([^()]+\)\s*$/, "").trim();
