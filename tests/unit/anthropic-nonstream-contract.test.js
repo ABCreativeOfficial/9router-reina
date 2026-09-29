@@ -10,9 +10,12 @@ const ENV_EXAMPLE = read("../../.env.example");
 /**
  * `/v1/messages` clients (Claude Code) do a non-streaming retry after a broken
  * stream and treat "HTTP 200 but not an Anthropic Message" as a second failure.
- * These assert the guard is wired on every path that can answer such a client,
- * without a DOM/HTTP harness — the shape logic itself is covered by
- * anthropic-message.test.js.
+ *
+ * The behavioural coverage for these paths lives in codex-forced-sse-claude.test.js
+ * (which actually invokes the handler and asserts the returned bytes) and in
+ * anthropic-message.test.js (the shape logic). What remains here is the wiring
+ * check: a guard can exist in the source and still be dead code if the branch
+ * above it returns first, so these assert placement, not mere presence.
  */
 describe("non-streaming Anthropic Message correctness", () => {
   it("validates the Claude response shape before returning 200", () => {
@@ -26,7 +29,26 @@ describe("non-streaming Anthropic Message correctness", () => {
     expect(NON_STREAMING).toContain("restoreToolNames(isClaudeMessageResponse ? claudeMessage : translatedResponse, toolNameMap)");
   });
 
-  it("guards the forced-streaming SSE→JSON path too", () => {
+  it("guards the Responses branch BEFORE its success return, not only the chat branch", () => {
+    // The original bug: the Codex/Responses branch returned a chat.completion
+    // long before the Claude guard in the chat-completions branch ever ran.
+    const responsesBranchStart = SSE_TO_JSON.indexOf("if (isCodexResponsesApi) {");
+    const chatBranchStart = SSE_TO_JSON.indexOf("// Standard Chat Completions SSE path");
+    expect(responsesBranchStart).toBeGreaterThan(-1);
+    expect(chatBranchStart).toBeGreaterThan(responsesBranchStart);
+
+    const responsesBranch = SSE_TO_JSON.slice(responsesBranchStart, chatBranchStart);
+    // The Responses branch must convert for a Claude client itself...
+    expect(responsesBranch).toContain("buildClaudeMessageFromResponses(jsonResponse)");
+    expect(responsesBranch).toContain("classifyResponsesTerminalState(jsonResponse)");
+    // ...and its conversion must precede its own success return.
+    const guardIndex = responsesBranch.indexOf("buildClaudeMessageFromResponses(jsonResponse)");
+    const successReturnIndex = responsesBranch.indexOf('success: true');
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(successReturnIndex).toBeGreaterThan(guardIndex);
+  });
+
+  it("guards the chat-completions SSE→JSON branch too", () => {
     expect(SSE_TO_JSON).toContain("ensureAnthropicMessage(finalBody)");
     expect(SSE_TO_JSON).toMatch(/return createErrorResult\(HTTP_STATUS\.BAD_GATEWAY, ensured\.reason\)/);
   });
