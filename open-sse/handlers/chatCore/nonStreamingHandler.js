@@ -1,6 +1,5 @@
 import { FORMATS } from "../../translator/formats.js";
 import { needsTranslation } from "../../translator/index.js";
-import { openAICompletionToClaudeMessage } from "../../translator/concerns/claudeMessage.js";
 import { ollamaBodyToOpenAI } from "../../translator/response/ollama-to-openai.js";
 import { addBufferToUsage, filterUsageForFormat } from "../../utils/usageTracking.js";
 import { createErrorResult } from "../../utils/error.js";
@@ -13,6 +12,7 @@ import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { ensureAnthropicMessage } from "../../translator/concerns/anthropicMessage.js";
 
 /**
  * Convert an OpenAI Chat Completions non-streaming response body into the
@@ -101,8 +101,12 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
   if (targetFormat === FORMATS.OPENAI && sourceFormat === FORMATS.OPENAI_RESPONSES) {
     return openAICompletionToResponses(responseBody, customToolNames);
   }
+  // A Claude client must never receive a raw Chat Completions body: the shape
+  // check below would reject it and the request would look like a failed
+  // fallback. Convert here so `content`/`tool_use` are Anthropic-native.
   if (targetFormat === FORMATS.OPENAI && sourceFormat === FORMATS.CLAUDE) {
-    return openAICompletionToClaudeMessage(responseBody);
+    const asMessage = ensureAnthropicMessage(responseBody);
+    return asMessage.ok ? asMessage.message : responseBody;
   }
   if (targetFormat === FORMATS.OPENAI) return responseBody;
 
@@ -283,14 +287,32 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   responseBody = decloakToolNames(responseBody, toolNameMap);
 
   const usage = extractUsageFromResponse(responseBody);
-  appendLog({ tokens: usage, status: "200 OK" });
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
-  if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
 
   const translatedResponse = needsTranslation(targetFormat, sourceFormat)
     ? translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames)
     : responseBody;
-  const isClaudeMessageResponse = sourceFormat === FORMATS.CLAUDE && translatedResponse?.type === "message";
+
+  // Claude clients do a non-streaming retry after a broken stream and treat a
+  // 200 that is not an Anthropic Message as a second failure. Validate the
+  // shape BEFORE any success bookkeeping, and convert an OpenAI-shaped body
+  // rather than letting it through (#1396 / #2820 class).
+  let claudeMessage = translatedResponse;
+  if (sourceFormat === FORMATS.CLAUDE) {
+    const ensured = ensureAnthropicMessage(translatedResponse);
+    if (!ensured.ok) {
+      appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
+      console.error(`[ChatCore] ${provider}/${model}: ${ensured.reason}`);
+      return createErrorResult(HTTP_STATUS.BAD_GATEWAY, ensured.reason);
+    }
+    claudeMessage = ensured.message;
+  }
+
+  // The response is confirmed usable — record it as a success from here on.
+  appendLog({ tokens: usage, status: "200 OK" });
+  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+  if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
+
+  const isClaudeMessageResponse = sourceFormat === FORMATS.CLAUDE && claudeMessage?.type === "message";
   // Responses-format translation produces a `object:"response"` body with no
   // `choices`; skip the Chat-Completions-specific post-processing below for it.
   const isResponsesResponse = sourceFormat === FORMATS.OPENAI_RESPONSES && translatedResponse?.object === "response";
@@ -357,7 +379,7 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
 
   return {
     success: true,
-    response: new Response(JSON.stringify(restoreToolNames(translatedResponse, toolNameMap)), {
+    response: new Response(JSON.stringify(restoreToolNames(isClaudeMessageResponse ? claudeMessage : translatedResponse, toolNameMap)), {
       headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", ...upstreamResponseHeaders(providerResponse.headers) }
     })
   };
