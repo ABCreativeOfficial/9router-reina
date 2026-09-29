@@ -251,9 +251,24 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
     .pipeThrough(upstreamTap)
     .pipeThrough(transformStream);
 
+  // One summary line per terminated stream. It distinguishes the failure modes
+  // that look identical from the client side: an upstream that never sent a byte,
+  // an upstream that sent bytes but produced no client event, a stall abort, and
+  // a normal completion. Counts only — never payload, headers or credentials.
+  const summary = (outcome) => {
+    const idleMs = Date.now() - lastChunkAt;
+    dbg(tag, `SUMMARY ${outcome} | rawChunks=${chunkCount} | rawBytes=${totalBytes} | msSinceLastRawUpstreamByte=${idleMs} | stallTimeoutMs=${stallTimeoutMs} | dur=${Date.now() - t0}ms`);
+  };
+  const withSummary = {
+    ...wrappedController,
+    handleComplete: () => { summary("complete"); wrappedController.handleComplete(); },
+    handleError: (e) => { summary(`error:${e?.message || "unknown"}`); wrappedController.handleError(e); },
+    handleDisconnect: (r) => { summary(`disconnect:${r}`); wrappedController.handleDisconnect(r); },
+  };
+
   return createDisconnectAwareStream(
     { readable: transformedBody, writable: { getWriter: () => ({ abort: () => Promise.resolve() }) } },
-    wrappedController,
+    withSummary,
     onAbortTerminal ? () => onAbortTerminal(abortMessage) : null
   );
 }
