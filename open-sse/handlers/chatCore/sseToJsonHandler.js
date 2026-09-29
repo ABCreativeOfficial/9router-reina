@@ -6,6 +6,7 @@ import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
+import { ensureAnthropicMessage } from "../../translator/concerns/anthropicMessage.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
 const isResponsesProvider = (p) => PROVIDERS[p]?.format === FORMATS.OPENAI_RESPONSES;
@@ -356,9 +357,22 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
     // lost on the non-streaming return path. Inlined (not imported from
     // nonStreamingHandler.js) to avoid a circular import: nonStreamingHandler
     // already imports parseSSEToOpenAIResponse from this module.
-    const finalBody = sourceFormat === FORMATS.OPENAI_RESPONSES
+    let finalBody = sourceFormat === FORMATS.OPENAI_RESPONSES
       ? chatCompletionToResponses(parsed, customToolNames)
       : parsed;
+
+    // A Claude client (Claude Code's non-streaming retry after a broken stream)
+    // must receive an Anthropic Message, not a Chat Completions body — a 200
+    // with the wrong shape reads as a second failure and the agent dies.
+    if (sourceFormat === FORMATS.CLAUDE) {
+      const ensured = ensureAnthropicMessage(finalBody);
+      if (!ensured.ok) {
+        appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
+        console.error(`[ChatCore] ${provider}/${model}: ${ensured.reason}`);
+        return createErrorResult(HTTP_STATUS.BAD_GATEWAY, ensured.reason);
+      }
+      finalBody = ensured.message;
+    }
 
     return { success: true, response: new Response(JSON.stringify(restoreToolNames(finalBody, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
   } catch (err) {

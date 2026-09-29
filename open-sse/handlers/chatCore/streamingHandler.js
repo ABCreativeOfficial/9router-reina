@@ -2,6 +2,7 @@ import { FORMATS } from "../../translator/formats.js";
 import { needsTranslation } from "../../translator/index.js";
 import { createSSETransformStreamWithLogger, createPassthroughStreamWithLogger } from "../../utils/stream.js";
 import { pipeWithDisconnect } from "../../utils/streamHandler.js";
+import { withSseKeepalive } from "../../utils/sseKeepalive.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { HTTP_STATUS, STREAM_STALL_TIMEOUT_MS } from "../../config/runtimeConfig.js";
 import { buildAbortedResponsesTerminalBytes } from "../../utils/responsesStreamHelpers.js";
@@ -10,6 +11,7 @@ import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLin
 import { saveRequestDetail } from "@/lib/usageDb.js";
 import { SSE_HEADERS_CORS as SSE_HEADERS } from "../../utils/sseConstants.js";
 import { upstreamResponseHeaders } from "../../utils/upstreamHeaders.js";
+import { dbg } from "../../utils/debugLog.js";
 
 // Codex returns Responses API SSE → which client format to translate INTO, by request sourceFormat.
 // Gemini-family all map to ANTIGRAVITY decoder; unknown sources fall back to OPENAI.
@@ -94,6 +96,21 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
   const stallTimeoutMs = PROVIDERS[provider]?.stallTimeoutMs || STREAM_STALL_TIMEOUT_MS;
   const transformedBody = pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal, stallTimeoutMs);
 
+  // Client-facing liveness only. This wraps the TRANSLATED stream, so heartbeats
+  // land between complete client events and never inside a frame, and it is
+  // layered outside pipeWithDisconnect so a heartbeat cannot reset the upstream
+  // stall budget (which keeps measuring raw upstream bytes; its own SUMMARY line
+  // reports that side of the connection).
+  const clientStream = withSseKeepalive(transformedBody, {
+    onKeepalive: (stats) => {
+      if (stats.final) {
+        dbg("KEEPALIVE", `${provider}/${model} | closed | keepalives=${stats.keepaliveCount} | clientEvents=${stats.clientEventCount} | dur=${stats.durationMs}ms`);
+        return;
+      }
+      dbg("KEEPALIVE", `${provider}/${model} | ping #${stats.keepaliveCount} | clientIdle=${stats.msSinceLastClientEvent}ms | clientEvents=${stats.clientEventCount}`);
+    },
+  });
+
   saveRequestDetail(buildRequestDetail({
     provider, model, connectionId,
     latency: { ttft: 0, total: Date.now() - requestStartTime },
@@ -110,7 +127,7 @@ export async function handleStreamingResponse({ providerResponse, provider, mode
 
   return {
     success: true,
-    response: new Response(transformedBody, { headers: { ...SSE_HEADERS, ...upstreamResponseHeaders(providerResponse.headers) } })
+    response: new Response(clientStream, { headers: { ...SSE_HEADERS, ...upstreamResponseHeaders(providerResponse.headers) } })
   };
 }
 
