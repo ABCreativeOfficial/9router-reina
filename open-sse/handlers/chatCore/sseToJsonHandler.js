@@ -6,7 +6,8 @@ import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
-import { ensureAnthropicMessage } from "../../translator/concerns/anthropicMessage.js";
+import { ensureAnthropicMessage, buildClaudeMessageFromResponses, anthropicTextContent } from "../../translator/concerns/anthropicMessage.js";
+import { classifyResponsesTerminalState } from "../../transformer/streamToJsonConverter.js";
 
 // Responses-API providers (e.g. codex) may emit SSE without content-type + use Responses output shape
 const isResponsesProvider = (p) => PROVIDERS[p]?.format === FORMATS.OPENAI_RESPONSES;
@@ -202,9 +203,52 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
   if (isCodexResponsesApi) {
     try {
       const jsonResponse = await convertResponsesStreamToJson(providerResponse.body);
-      if (onRequestSuccess) await onRequestSuccess();
+
+      // A Responses stream that never reached a successful terminal event must
+      // not be reported as a completed turn. Nothing has been sent to the client
+      // yet (this is the non-streaming path), so failing here lets the account
+      // loop retry or fall back instead of returning a body that claims success
+      // (#4072).
+      const terminal = classifyResponsesTerminalState(jsonResponse);
+      if (!terminal.ok) {
+        appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
+        if (log?.warn) log.warn("CHAT", `${provider}/${model} | ${terminal.reason}`);
+        return createErrorResult(HTTP_STATUS.BAD_GATEWAY, terminal.reason);
+      }
 
       const usage = jsonResponse.usage || {};
+
+      // A Claude client (Claude Code's non-streaming retry after a broken stream)
+      // must receive an Anthropic Message. The body assembled below is
+      // Responses/chat shaped, so convert and validate HERE — before any success
+      // return — otherwise the client sees "JSON but not a Message".
+      if (sourceFormat === FORMATS.CLAUDE) {
+        const claudeMessage = buildClaudeMessageFromResponses(jsonResponse);
+        if (!claudeMessage) {
+          appendLog({ status: `FAILED ${HTTP_STATUS.BAD_GATEWAY}` });
+          if (log?.warn) log.warn("CHAT", `${provider}/${model} | Responses stream did not convert to an Anthropic Message`);
+          return createErrorResult(HTTP_STATUS.BAD_GATEWAY, "Upstream Responses stream did not convert to an Anthropic Message");
+        }
+        if (onRequestSuccess) await onRequestSuccess();
+        appendLog({ tokens: usage, status: "200 OK" });
+        saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
+        if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
+        const claudeLatency = Date.now() - requestStartTime;
+        saveRequestDetail(buildRequestDetail({
+          ...ctx,
+          latency: { ttft: claudeLatency, total: claudeLatency },
+          tokens: { prompt_tokens: usage.input_tokens || 0, completion_tokens: usage.output_tokens || 0 },
+          response: { content: anthropicTextContent(claudeMessage), thinking: null, finish_reason: claudeMessage.stop_reason || "unknown" },
+          status: "success"
+        }, { endpoint: clientRawRequest?.endpoint || null })).catch(() => {});
+        if (log?.debug) {
+          // Shapes and counters only — never prompt text, headers or credentials.
+          log.debug("CHAT", `${provider}/${model} | forced-SSE→JSON | clientFormat=claude | providerFormat=openai-responses | responsesTerminal=${terminal.status} | convertedFormat=anthropic-message | conversionValid=true`);
+        }
+        return { success: true, response: new Response(JSON.stringify(restoreToolNames(claudeMessage, toolNameMap)), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
+      }
+
+      if (onRequestSuccess) await onRequestSuccess();
       appendLog({ tokens: usage, status: "200 OK" });
       saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, silent: true });
       if (log?.line) log.line(reqTag, "📊", formatDoneLine({ usage, latency: { total: Date.now() - requestStartTime } }));
