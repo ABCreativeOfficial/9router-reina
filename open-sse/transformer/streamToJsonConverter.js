@@ -36,10 +36,46 @@ function processSSEMessage(msg, state) {
     }
   } else if (eventType === "response.failed") {
     state.status = "failed";
+  } else if (eventType === "response.cancelled" || eventType === "response.canceled") {
+    state.status = "cancelled";
+  } else if (eventType === "response.incomplete") {
+    // A truncated turn (e.g. max_output_tokens) is not a completed one.
+    state.status = "incomplete";
   }
 }
 
 const EMPTY_RESPONSE = { input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+
+/** Terminal states a Responses stream can end on. */
+export const RESPONSES_TERMINAL_COMPLETED = "completed";
+export const RESPONSES_TERMINAL_DONE = "done";
+const RESPONSES_TERMINAL_FAILURES = ["failed", "cancelled", "canceled", "incomplete"];
+
+/**
+ * Did this converted Responses stream actually reach a successful terminal event?
+ *
+ * A stream that ends before `response.completed` leaves the status at
+ * `in_progress`, and one that carries `response.failed` / `response.cancelled` /
+ * `response.incomplete` sets a failure status. Neither is a success: returning
+ * them as HTTP 200 would hand the client a body that claims a completed turn.
+ *
+ * @param {object} result - output of convertResponsesStreamToJson
+ * @returns {{ ok: boolean, status: string, reason: string|null }}
+ */
+export function classifyResponsesTerminalState(result) {
+  const status = String(result?.status || "").trim().toLowerCase() || "unknown";
+  if (status === RESPONSES_TERMINAL_COMPLETED || status === RESPONSES_TERMINAL_DONE) {
+    return { ok: true, status, reason: null };
+  }
+  if (RESPONSES_TERMINAL_FAILURES.includes(status)) {
+    return { ok: false, status, reason: `Upstream Responses stream ended with status "${status}"` };
+  }
+  return {
+    ok: false,
+    status,
+    reason: `Incomplete Responses stream: no terminal response.completed event (status "${status}")`,
+  };
+}
 
 /**
  * Convert Responses API SSE stream to single JSON response

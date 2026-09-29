@@ -11,7 +11,7 @@
  */
 import { fromOpenAIFinish } from "./finishReason.js";
 import { FORMATS } from "../formats.js";
-import { ROLE, CLAUDE_BLOCK } from "../schema/index.js";
+import { ROLE, CLAUDE_BLOCK, RESPONSES_ITEM, CLAUDE_STOP } from "../schema/index.js";
 
 /** Parse a tool-call arguments value into an object without throwing. */
 function parseToolArguments(value) {
@@ -126,4 +126,119 @@ export function ensureAnthropicMessage(body, { includeThinking = false } = {}) {
   if (converted) return { ok: true, message: converted };
 
   return { ok: false, reason: "Upstream returned a response that is not a valid Anthropic Message" };
+}
+
+/** Concatenate the text of an Anthropic Message's text blocks (for logging). */
+export function anthropicTextContent(message) {
+  if (!Array.isArray(message?.content)) return null;
+  const text = message.content
+    .filter((block) => block?.type === CLAUDE_BLOCK.TEXT && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("");
+  return text.length > 0 ? text : null;
+}
+
+/**
+ * Build an Anthropic Message from a Responses-API body.
+ *
+ * Used when a Codex/Responses upstream had to be streamed for a client that
+ * asked for JSON: the Responses `output` array is the semantic source, so text
+ * becomes `text` blocks and `function_call` items become `tool_use` blocks.
+ * Tool use must stay valid — a tool-calling turn is a normal turn, not a
+ * degraded response.
+ *
+ * @param {object} responsesBody - Responses API body ({ output: [...] })
+ * @param {object} [options]
+ * @param {boolean} [options.includeThinking] - emit a `thinking` block for reasoning summary text
+ * @returns {object|null} Anthropic Message, or null when nothing usable was found
+ */
+export function responsesToAnthropicMessage(responsesBody, { includeThinking = false } = {}) {
+  const output = responsesBody?.output;
+  if (!Array.isArray(output)) return null;
+
+  const content = [];
+  let sawReasoning = false;
+  let sawMessage = false;
+  let sawToolCall = false;
+
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+
+    if (item.type === RESPONSES_ITEM.REASONING) {
+      const summaryText = Array.isArray(item.summary)
+        ? item.summary.map((part) => (typeof part?.text === "string" ? part.text : "")).join("")
+        : "";
+      if (includeThinking && summaryText.length > 0) {
+        content.push({ type: CLAUDE_BLOCK.THINKING, thinking: summaryText });
+      }
+      sawReasoning = true;
+      continue;
+    }
+
+    if (item.type === RESPONSES_ITEM.MESSAGE) {
+      sawMessage = true;
+      const text = Array.isArray(item.content)
+        ? item.content.map((part) => (typeof part?.text === "string" ? part.text : "")).join("")
+        : "";
+      if (text.length > 0) content.push({ type: CLAUDE_BLOCK.TEXT, text });
+      continue;
+    }
+
+    if (item.type === RESPONSES_ITEM.FUNCTION_CALL) {
+      sawToolCall = true;
+      content.push({
+        type: CLAUDE_BLOCK.TOOL_USE,
+        id: item.call_id || item.id || `toolu_${content.length}`,
+        name: item.name || "",
+        input: parseToolArguments(item.arguments),
+      });
+      continue;
+    }
+
+    // Custom (freeform) tool calls carry a raw string input, not JSON arguments.
+    if (item.type === RESPONSES_ITEM.CUSTOM_TOOL_CALL) {
+      sawToolCall = true;
+      content.push({
+        type: CLAUDE_BLOCK.TOOL_USE,
+        id: item.call_id || item.id || `toolu_${content.length}`,
+        name: item.name || "",
+        input: typeof item.input === "string" ? { input: item.input } : (item.input || {}),
+      });
+    }
+  }
+
+  if (!sawMessage && !sawToolCall && !sawReasoning) return null;
+
+  // A completed turn always carries at least one block; a reasoning-only turn
+  // that the caller did not want as a thinking block becomes empty text.
+  if (content.length === 0) content.push({ type: CLAUDE_BLOCK.TEXT, text: "" });
+
+  const usage = responsesBody.usage || {};
+  const status = String(responsesBody.status || "").toLowerCase();
+  const stopReason = sawToolCall
+    ? CLAUDE_STOP.TOOL_USE
+    : (status === "incomplete" ? CLAUDE_STOP.MAX_TOKENS : CLAUDE_STOP.END_TURN);
+
+  return {
+    id: String(responsesBody.id || `msg_${Date.now()}`).replace(/^resp_/, ""),
+    type: "message",
+    role: ROLE.ASSISTANT,
+    model: responsesBody.model || "unknown",
+    content,
+    stop_reason: stopReason,
+    stop_sequence: null,
+    usage: {
+      input_tokens: usage.input_tokens || 0,
+      output_tokens: usage.output_tokens || 0,
+    },
+  };
+}
+
+/**
+ * Responses body → validated Anthropic Message, or null when it cannot be built.
+ * Wraps responsesToAnthropicMessage so callers get a single shape to check.
+ */
+export function buildClaudeMessageFromResponses(responsesBody, options) {
+  const message = responsesToAnthropicMessage(responsesBody, options);
+  return isAnthropicMessage(message) ? message : null;
 }
