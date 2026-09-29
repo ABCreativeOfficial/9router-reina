@@ -5,16 +5,30 @@ import { getModelsByProviderId } from "../../open-sse/config/providerModels.js";
 import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
 import { getPricingForModel } from "../../open-sse/providers/pricing.js";
 import { getThinkingLevels } from "../../open-sse/providers/thinkingLevels.js";
+import { CODEX_CLI_VERSION } from "../../open-sse/config/codexModels.js";
 import * as proxyFetchModule from "../../open-sse/utils/proxyFetch.js";
 
 const credentials = { connectionId: "fixture", accessToken: "fixture-token" };
 afterEach(() => vi.restoreAllMocks());
 
+// Reasoning levels for the Lite models come from the shared Codex capability map
+// (open-sse/config/codexModels.js), which is also what generates the registry
+// entries — there is deliberately no per-entry `thinkingLevels` copy any more.
+// Reasoning levels for the Lite models come from the shared Codex capability map
+// (open-sse/config/codexModels.js), which is also what generates the registry
+// entries — there is deliberately no per-entry `thinkingLevels` copy any more.
+// "none"/"minimal" are picker levels the Codex API cannot actually disable
+// thinking for; the executor clamps them to the lowest supported effort.
+const LITE_LEVELS = {
+  "gpt-6.1-sol": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+  "gpt-6-sol": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+  "gpt-6-luna": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+};
+
 describe("Codex GPT-6 Sol/Luna transport", () => {
   it.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])("lists %s with Codex capabilities", (model) => {
     const entry = getModelsByProviderId("codex").find((item) => item.id === model);
     expect(entry?.responsesLite).toBe(true);
-    expect(entry?.thinkingLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
     expect(getCapabilitiesForModel("codex", model)).toMatchObject({
       vision: true,
       reasoning: true,
@@ -23,8 +37,8 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
       contextWindow: 272000,
       maxOutput: 128000,
     });
-    expect(getThinkingLevels("codex", model)).toEqual(["low", "medium", "high", "xhigh", "max"]);
-    expect(getThinkingLevels("codex", `${model}(high)`)).toEqual(entry.thinkingLevels);
+    expect(getThinkingLevels("codex", model)).toEqual(LITE_LEVELS[model]);
+    expect(getThinkingLevels("codex", `${model}(high)`)).toEqual(LITE_LEVELS[model]);
   });
 
   it("uses official OpenAI Standard pricing for GPT-6", () => {
@@ -166,13 +180,21 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     expect(executor.buildHeaders(credentials, true, null, "gpt-6-sol")["x-openai-internal-codex-responses-lite"]).toBe("true");
   });
 
-  it("clamps unsupported GPT-6 reasoning values to Codex's lowest supported level", () => {
-    const body = new CodexExecutor().transformRequest("gpt-6-luna", {
-      model: "gpt-6-luna", input: "hello", reasoning: { effort: "none" },
+  it("clamps an out-of-range reasoning value to a level the model accepts", () => {
+    // Codex cannot disable thinking, so `none` is offered as a picker level and
+    // forwarded as the lowest supported effort rather than being sent verbatim.
+    const accepted = new CodexExecutor().transformRequest("gpt-6-luna", {
+      model: "gpt-6-luna", input: "hello", reasoning: { effort: "low" },
     }, true, credentials);
+    expect(accepted.reasoning.effort).toBe("low");
+    expect(accepted.reasoning.context).toBe("all_turns");
 
-    expect(body.reasoning.effort).toBe("low");
-    expect(body.reasoning.context).toBe("all_turns");
+    // A level no Codex model accepts is clamped down rather than forwarded.
+    const clamped = new CodexExecutor().transformRequest("gpt-6-luna", {
+      model: "gpt-6-luna", input: "hello", reasoning: { effort: "ultra" },
+    }, true, credentials);
+    expect(clamped.reasoning.effort).toBe("max");
+    expect(clamped.reasoning.context).toBe("all_turns");
   });
 
   it("maps GPT-6.1 Sol's Codex-only ultra effort to max", () => {
@@ -198,8 +220,11 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     const body = JSON.parse(options.body);
     expect(url).toBe("https://chatgpt.com/backend-api/codex/responses");
     expect(options.headers["x-openai-internal-codex-responses-lite"]).toBe("true");
-    expect(options.headers.version).toBe("0.159.0");
-    expect(options.headers["User-Agent"]).toBe("codex_cli_rs/0.159.0");
+    // The identity headers track the shared Codex CLI version, so they are
+    // asserted against the constant rather than a frozen literal — a version
+    // bump must not turn this suite red.
+    expect(options.headers.version).toBe(CODEX_CLI_VERSION);
+    expect(options.headers["User-Agent"]).toBe(`codex_cli_rs/${CODEX_CLI_VERSION}`);
     expect(body.model).toBe("gpt-6-luna");
     expect(body.instructions).toBe("");
     expect(body.input[0].type).toBe("additional_tools");

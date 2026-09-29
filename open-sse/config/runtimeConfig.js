@@ -39,6 +39,15 @@ function envMs(name, def) {
   return Number.isFinite(n) && n > 0 ? n : def;
 }
 
+// Same as envMs, but accepts 0 as a meaningful "disabled" value.
+// Used by SSE_KEEPALIVE_MS where 0 turns the heartbeat off.
+function envMsAllowZero(name, def) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return def;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : def;
+}
+
 function envUrl(name, def) {
   const raw = process.env[name]?.trim();
   return raw || def;
@@ -48,15 +57,32 @@ function envUrl(name, def) {
 // Configure this for a separate Docker service or remote SearXNG instance.
 export const SEARXNG_URL = envUrl("SEARXNG_URL", "http://localhost:8888/search");
 
-// Inter-chunk stall timeout (once tokens are flowing). Generous headroom so
-// slow reasoning models aren't aborted mid-stream. Env: STREAM_STALL_TIMEOUT_MS.
-export const STREAM_STALL_TIMEOUT_MS = envMs("STREAM_STALL_TIMEOUT_MS", 360 * 1000);
+// --- Timeout budgets (all values in milliseconds) -------------------------
+// Three separate concerns, deliberately not shared:
+//   1. client idle liveness   → SSE_KEEPALIVE_MS (heartbeat to the CLIENT only)
+//   2. upstream first byte    → STREAM_FIRST_CHUNK_TIMEOUT_MS
+//   3. upstream post-activity → STREAM_STALL_TIMEOUT_MS
+// A client heartbeat must never reset either upstream budget: the upstream can
+// still be dead while we keep the client connection visibly alive.
+//
+// Defaults are tuned for long Sol/Codex reasoning turns, where the model can
+// think for minutes before the first content token.
+// Env: STREAM_STALL_TIMEOUT_MS. 15 minutes.
+export const STREAM_STALL_TIMEOUT_MS = envMs("STREAM_STALL_TIMEOUT_MS", 900 * 1000);
 
 // Time-to-first-token timeout (prompt prefill). Env: STREAM_FIRST_CHUNK_TIMEOUT_MS.
-export const STREAM_FIRST_CHUNK_TIMEOUT_MS = envMs("STREAM_FIRST_CHUNK_TIMEOUT_MS", 200 * 1000);
+// 5 minutes.
+export const STREAM_FIRST_CHUNK_TIMEOUT_MS = envMs("STREAM_FIRST_CHUNK_TIMEOUT_MS", 300 * 1000);
 
-// Fetch connect timeout: abort if upstream doesn't return response headers within this duration
+// Fetch connect timeout: abort if upstream doesn't return response headers within this duration.
+// Env: FETCH_CONNECT_TIMEOUT_MS. 60 seconds.
 export const FETCH_CONNECT_TIMEOUT_MS = envMs("FETCH_CONNECT_TIMEOUT_MS", 60 * 1000);
+
+// Client-facing SSE heartbeat interval. Emitted only when no real client event
+// has been sent for this long, so an idle-looking connection stays alive for
+// clients with their own idle watchdog (Claude Code aborts at ~180s).
+// 0 disables the heartbeat. Env: SSE_KEEPALIVE_MS. 15 seconds.
+export const SSE_KEEPALIVE_MS = envMsAllowZero("SSE_KEEPALIVE_MS", 15 * 1000);
 
 // Gemini native TTS fetch timeout: abort if Google does not return response headers in time.
 export const GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS = envMs("GEMINI_NATIVE_TTS_FETCH_TIMEOUT_MS", 45 * 1000);
