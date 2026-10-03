@@ -180,4 +180,24 @@ describe("getProviderCredentials — per-account model access", () => {
     // C only has n — must not be reached for m at any level
     expect(await getProviderCredentials("codex", exclude, "m(low)")).toBeNull();
   });
+
+  it("a bracket-modifier request routes on the base model's grant", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      acc("A", ["gpt-6-sol"], { priority: 1 }),
+      acc("B", ["gpt-6-luna"], { priority: 2 }),
+    ]);
+    // `<base>[1m]` selects an extended-context variant of the same model, so a
+    // base-model grant covers it — and a grant stored with the marker does not
+    // become a hidden second dimension.
+    expect((await getProviderCredentials("codex", null, "gpt-6-sol[1m]")).connectionId).toBe("A");
+    expect((await getProviderCredentials("codex", null, "gpt-6-sol")).connectionId).toBe("A");
+    expect(await getProviderCredentials("codex", null, "gpt-6-terra[1m]")).toBeNull();
+  });
+
+  it("a stored bracket-modifier entry grants the base model too", async () => {
+    mocks.getProviderConnections.mockResolvedValue([acc("A", ["gpt-6-sol[1m]"])]);
+    expect((await getProviderCredentials("codex", null, "gpt-6-sol")).connectionId).toBe("A");
+    expect((await getProviderCredentials("codex", null, "gpt-6-sol[1m]")).connectionId).toBe("A");
+    expect(await getProviderCredentials("codex", null, "gpt-6-luna")).toBeNull();
+  });
 });
