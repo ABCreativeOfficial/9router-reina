@@ -39,6 +39,7 @@ function outbound(model, extraBody = {}) {
 describe("Codex public catalog matches the official visible list", () => {
   it("exposes exactly the official visible chat models", () => {
     expect(CODEX_PUBLIC_MODEL_IDS).toEqual([
+      "gpt-6.1-sol",
       "gpt-6-astra",
       "gpt-6-sol",
       "gpt-6-luna",
@@ -46,6 +47,9 @@ describe("Codex public catalog matches the official visible list", () => {
       "gpt-5.6-terra",
       "gpt-5.6-luna",
       "gpt-5.5",
+      // Confirmed live via backend-api/codex/models (#4202).
+      "gpt-daybreak-blue-latest",
+      "gpt-reserve",
     ]);
   });
 

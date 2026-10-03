@@ -98,11 +98,14 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     const antigravityQuotaCache = isAntigravity && model ? getAntigravityQuotaCache() : null;
 
     // Filter out model-locked, excluded, and Antigravity quota-exhausted connections.
+    // Per-account model access is NOT re-checked here: the eligibleConnections
+    // filter above is the single enforcement point and it normalizes provider
+    // prefixes, `(level)` suffixes and `[1m]` markers. An exact-membership check
+    // against `requestedModel` would contradict that normalization and empty the
+    // pool for `m(level)`, `provider/m` and `m[1m]` requests.
     const availableConnections = eligibleConnections.filter(c => {
       if (excludeSet.has(c.id)) return false;
       if (isModelLockActive(c, model)) return false;
-      const enabled = c.providerSpecificData?.enabledModels;
-      if (providerId === "codex" && Array.isArray(enabled) && enabled.length && requestedModel && !enabled.includes(requestedModel)) return false;
       // Antigravity: skip if live quota exhausted for this model
       if (isAntigravity && model && antigravityQuotaCache) {
         const quota = antigravityQuotaCache.get(c.id)?.[model];
