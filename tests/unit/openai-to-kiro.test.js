@@ -525,7 +525,7 @@ describe("openaiToKiroRequest", () => {
       });
     });
 
-    it("clamps reasoning_effort max to Kiro max_thinking_length 32000", () => {
+    it("passes reasoning_effort max through as Kiro max_thinking_length 32000", () => {
       const body = {
         reasoning_effort: "max",
         messages: [{ role: "user", content: "Think as much as possible" }]
@@ -534,7 +534,9 @@ describe("openaiToKiroRequest", () => {
       const result = openaiToKiroRequest("claude-sonnet-4.6", body, true, {});
 
       expect(systemPromptOf(result)).toContain("<max_thinking_length>32000</max_thinking_length>");
-      expect(result.additionalModelRequestFields?.output_config?.effort).toBe("high");
+      // Kiro's 4.6 tier list is low|medium|high|max, so `max` is a real tier and
+      // is forwarded as-is; only `xhigh` is clamped for models that lack it.
+      expect(result.additionalModelRequestFields?.output_config?.effort).toBe("max");
     });
 
     it("clamps OpenAI Responses reasoning.effort xhigh to max_thinking_length 32000", () => {
