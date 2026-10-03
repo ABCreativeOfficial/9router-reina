@@ -32,6 +32,28 @@ export function splitModelLevel(modelId) {
   return { base: m[1].trim(), level: m[2].trim().toLowerCase() };
 }
 
+// A trailing bracket modifier (`gpt-6-sol[1m]`) selects an extended-context
+// variant of the SAME model, not a different one. Codex exposes those variants
+// as separate registry ids while the request reaches this policy with the marker
+// still attached, so it is normalized away on both sides: a grant for the base
+// model covers its `[1m]` variant, and a stored `[1m]` entry collapses to the
+// base id rather than becoming a hidden second dimension.
+const BRACKET_SUFFIX_RE = /(?:\[[^\]]*\]\s*)+$/;
+
+/** Remove a trailing bracket-modifier run; no-op when absent. */
+export function stripBracketSuffix(modelId) {
+  const raw = String(modelId ?? "").trim();
+  return raw.replace(BRACKET_SUFFIX_RE, "").trim();
+}
+
+/**
+ * Normalize a model id to its policy identity: bracket modifiers and the
+ * request-time `(level)` suffix removed.
+ */
+function policyIdentity(modelId) {
+  return splitModelLevel(stripBracketSuffix(modelId)).base;
+}
+
 /**
  * Normalize a user-supplied model allowlist: strings only, trimmed, level suffix dropped,
  * no blanks, deduped, capped.
@@ -44,7 +66,7 @@ export function sanitizeEnabledModels(input) {
   const seen = new Set();
   for (const entry of input) {
     if (typeof entry !== "string") continue;
-    const id = splitModelLevel(entry).base;
+    const id = policyIdentity(entry);
     if (!id || seen.has(id)) continue;
     seen.add(id);
     out.push(id);
@@ -93,7 +115,7 @@ function stripProviderPrefix(modelId, prefixes) {
 
 /** Normalize an id to the bare model, with the connection's provider prefix and level removed. */
 function normalizeEntry(modelId, prefixes) {
-  return stripProviderPrefix(splitModelLevel(modelId).base, prefixes);
+  return stripProviderPrefix(policyIdentity(modelId), prefixes);
 }
 
 /**
