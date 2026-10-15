@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   CODEX_MODEL_CAPABILITIES,
   CODEX_INTERNAL_MODEL_CAPABILITIES,
   CODEX_PUBLIC_MODEL_IDS,
   CODEX_CLI_VERSION,
+  codexIdEncodesEffortOrTier,
   getCodexDefaultReasoning,
   listCodexPublicModelIds,
   matchCodexBaseModel,
   parseCodexModelReference,
 } from "../../open-sse/config/codexModels.js";
+
+const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 import { CodexExecutor } from "../../open-sse/executors/codex.js";
 import { PROVIDERS } from "../../open-sse/config/providers.js";
 import {
@@ -279,5 +283,80 @@ describe("non-Codex providers are untouched", () => {
     const parsed = parseCodexModelReference("grok-4.5-high");
     expect(parsed.ok).toBe(true);
     expect(parsed.unknown).toBe(true);
+  });
+});
+
+/**
+ * The provider page appends "(level)" to a model label when a thinking mode is
+ * selected. A Codex virtual alias already encodes its effort, so appending would
+ * state it twice and the alias parser rejects the result. These lock both halves:
+ * the predicate that identifies those ids, and the page guard that skips them.
+ */
+describe("thinking suffix is never stacked onto a Codex alias", () => {
+  const LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
+  it("identifies every dash-form alias and no canonical slug", () => {
+    for (const id of listCodexPublicModelIds()) {
+      // An alias is anything carrying `-<effort>`, `-(fast)` or both; a canonical
+      // slug and its `[1m]` variant carry neither.
+      const expected = id.includes("-(") || /-(low|medium|high|xhigh|max|ultra)$/.test(id);
+      expect(codexIdEncodesEffortOrTier(id), id).toBe(expected);
+    }
+  });
+
+  it("proves the stacking it prevents would have been rejected", () => {
+    // Without the guard every alias × level combination is a contradictory
+    // request: this is the 400 the user would have hit from the UI label.
+    const stacked = [];
+    for (const id of listCodexPublicModelIds()) {
+      if (!codexIdEncodesEffortOrTier(id)) continue;
+      for (const level of LEVELS) {
+        const label = `${id}(${level})`;
+        if (parseCodexModelReference(label).ok === false) stacked.push(label);
+      }
+    }
+    expect(stacked.length).toBeGreaterThan(0);
+    // Every stacked form is rejected — the guard exists so none is ever produced.
+    for (const label of stacked) {
+      expect(parseCodexModelReference(label).ok, label).toBe(false);
+    }
+  });
+
+  it("leaves a canonical model and its [1m] variant suffixable", () => {
+    // These are the ids the thinking dropdown is actually for: one effort, stated once.
+    expect(codexIdEncodesEffortOrTier("gpt-6-sol")).toBe(false);
+    expect(codexIdEncodesEffortOrTier("gpt-6-sol[1m]")).toBe(false);
+    expect(parseCodexModelReference("gpt-6-sol(high)").ok).toBe(true);
+  });
+
+  it("does not claim unknown or foreign ids", () => {
+    for (const id of ["my-custom-model", "grok-4.5-high", "claude-sonnet-4.5", "", null, undefined]) {
+      expect(codexIdEncodesEffortOrTier(id), String(id)).toBe(false);
+    }
+  });
+
+  it("is gated to the codex provider at the call site", () => {
+    // The predicate itself is not provider-aware (Kiro's `gpt-5.6-sol-thinking`
+    // also extends a Codex base), so the page must gate it on the provider.
+    expect(codexIdEncodesEffortOrTier("gpt-5.6-sol-thinking")).toBe(true);
+
+    const PAGE = read("../../src/app/(dashboard)/dashboard/providers/[id]/page.js");
+    expect(PAGE).toContain('const isCodexProvider = providerId === "codex"');
+    expect(PAGE).toContain("if (isCodexProvider && codexIdEncodesEffortOrTier(modelId)) return null;");
+    // The guard must run before the level lookup, so no suffix is ever produced.
+    const guardIndex = PAGE.indexOf("codexIdEncodesEffortOrTier(modelId)) return null");
+    const lookupIndex = PAGE.indexOf("const levels = getThinkingLevels(providerId, modelId);");
+    expect(guardIndex).toBeGreaterThan(-1);
+    expect(lookupIndex).toBeGreaterThan(guardIndex);
+  });
+
+  it("leaves non-Codex providers' labels unchanged", () => {
+    // Kiro's suffixable ids must still get their level appended: the page gate is
+    // provider-scoped, so the predicate returning true for them is harmless.
+    const PAGE = read("../../src/app/(dashboard)/dashboard/providers/[id]/page.js");
+    expect(PAGE).toContain("providerId === \"codex\"");
+    // Nothing else appends the suffix.
+    const MODAL = read("../../src/shared/components/ModelSelectModal.js");
+    expect(MODAL).not.toContain("thinkingSuffix");
   });
 });
