@@ -214,6 +214,27 @@ export function matchCodexBaseModel(modelId) {
 }
 
 /**
+ * Does this id carry a Codex virtual-alias suffix (`-<effort>`, `-(fast)`,
+ * `-<effort>-(fast)`) rather than being a bare canonical slug?
+ *
+ * This is a pure string test against the Codex base-id list — it has no provider
+ * awareness, so a *different* provider's model that happens to extend a Codex
+ * base (Kiro's `gpt-5.6-sol-thinking`) also returns true. Callers must gate it on
+ * the codex provider themselves; the provider page does exactly that.
+ *
+ * Used by the provider page, which appends a `(level)` suffix to a model's label
+ * when a thinking mode is selected. Applying that to an alias would encode the
+ * effort twice — `gpt-6-sol-low` + `(high)` becomes `gpt-6-sol-low(high)`, a
+ * contradictory combination the alias parser rejects. Such ids are skipped: the
+ * alias already states its own effort.
+ */
+export function codexIdEncodesEffortOrTier(modelId) {
+  if (typeof modelId !== "string") return false;
+  const match = matchCodexBaseModel(modelId.trim());
+  return !!match && match.rest !== "";
+}
+
+/**
  * Parse a Codex model reference into its canonical wire form.
  *
  * Accepted shapes (provider must already be codex — this parser is Codex-only):
