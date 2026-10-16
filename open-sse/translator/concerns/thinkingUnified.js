@@ -5,7 +5,7 @@
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 import { getThinkingLevels } from "../../providers/thinkingLevels.js";
 import { PROVIDERS } from "../../providers/index.js";
-import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
+import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel, isReasoningLevelSuffix } from "./thinking.js";
 
 // Map a target wire-format to its native thinking format (when capability has none).
 const FORMAT_TO_NATIVE = {
@@ -23,18 +23,22 @@ const FORMAT_TO_NATIVE = {
 };
 
 // Strip a trailing thinking suffix "model(value)" → "model" (no-op when absent).
+// Only a real reasoning level is stripped: `gpt-6-sol-(fast)` carries the Codex
+// service-tier marker, not a level, so it must survive intact.
 export function stripThinkingSuffix(model) {
   if (typeof model !== "string") return model;
-  const m = model.match(/^(.*)\([^()]+\)\s*$/);
-  return m ? m[1].trim() : model;
+  const m = model.match(/^(.*)\(([^()]+)\)\s*$/);
+  if (!m || !isReasoningLevelSuffix(m[2])) return model;
+  return m[1].trim();
 }
 
 // Parse model-name suffix "model(value)" → { cleanModel, override }.
 // value: level name (high) | number (8192) | auto | none. null override when absent.
+// A `(value)` that is not a level leaves the id untouched — see stripThinkingSuffix.
 export function parseSuffix(model) {
   if (typeof model !== "string") return { cleanModel: model, override: null };
   const m = model.match(/^(.*)\(([^()]+)\)\s*$/);
-  if (!m) return { cleanModel: model, override: null };
+  if (!m || !isReasoningLevelSuffix(m[2])) return { cleanModel: model, override: null };
   const cleanModel = m[1].trim();
   const raw = m[2].trim().toLowerCase();
   if (raw === "none" || raw === "off") return { cleanModel, override: { mode: "none" } };
@@ -42,7 +46,7 @@ export function parseSuffix(model) {
   if (raw === "ultra") return { cleanModel, override: { mode: "level", level: raw } };
   if (/^\d+$/.test(raw)) return { cleanModel, override: { mode: "budget", budget: Number(raw) } };
   if (LEVEL_TO_BUDGET[raw] !== undefined) return { cleanModel, override: { mode: "level", level: raw } };
-  return { cleanModel, override: null };
+  return { cleanModel: model, override: null };
 }
 
 // Extract unified thinking intent from a request body (post-translation, mixed shapes).
