@@ -13,86 +13,66 @@
  */
 
 import { describe, it, expect } from "vitest";
-import fs from "fs";
-import path from "path";
-import codexRegistry from "../../open-sse/providers/registry/codex.js";
+import { getProviderModels } from "../../open-sse/config/providerModels.js";
 
 // ── #4202 Registry checks ────────────────────────────────────────────────────
+// The registry generates its model list from the shared Codex capability map
+// (open-sse/config/codexModels.js), so these assert the RESOLVED ids rather than
+// string literals in the registry source — the literals no longer exist there.
+const registryIds = getProviderModels("cx").map((m) => m.id);
 
-const codexSrc = fs.readFileSync(
-  path.resolve("../open-sse/providers/registry/codex.js"),
-  "utf-8"
-);
-
-// This fork's single source of truth for the Codex model set is
-// open-sse/config/codexModels.js; the registry only holds the generator. Assert
-// against the catalog plus the ids the registry actually emits, which is stronger
-// than matching literal text in one file.
-const catalogSrc = fs.readFileSync(
-  path.resolve("../open-sse/config/codexModels.js"),
-  "utf-8"
-);
-const codexModelIds = new Set(
-  (codexRegistry.models || codexRegistry.default?.models || []).map((model) => model.id)
-);
 
 describe("Codex registry — ghost models removed (#4202)", () => {
   it("gpt-5.4 is removed", () => {
-    // Match only a standalone entry, not inside gpt-5.4-mini or gpt-5.45 etc.
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.4"/);
+    expect(registryIds).not.toContain("gpt-5.4");
   });
 
   it("gpt-5.4-mini is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.4-mini"/);
+    expect(registryIds).not.toContain("gpt-5.4-mini");
   });
 
   it("gpt-5.3-codex-spark is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.3-codex-spark"/);
+    expect(registryIds).not.toContain("gpt-5.3-codex-spark");
   });
 
   it("gpt-5.4-image is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.4-image"/);
+    expect(registryIds).not.toContain("gpt-5.4-image");
   });
 
   it("gpt-5.5 is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.5"/);
+    expect(registryIds).not.toContain("gpt-5.5");
   });
 
   it("gpt-5.5-image is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.5-image"/);
+    expect(registryIds).not.toContain("gpt-5.5-image");
   });
 
   it("gpt-5.3-image is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.3-image"/);
+    expect(registryIds).not.toContain("gpt-5.3-image");
   });
 });
 
 describe("Codex registry — new models added (#4202)", () => {
   it("gpt-daybreak-blue-latest is present", () => {
-    expect(catalogSrc).toContain('"gpt-daybreak-blue-latest"');
-      expect(codexModelIds.has("gpt-daybreak-blue-latest")).toBe(true);
+    expect(registryIds).toContain("gpt-daybreak-blue-latest");
   });
 
   it("gpt-reserve is present", () => {
-    expect(catalogSrc).toContain('"gpt-reserve"');
-      expect(codexModelIds.has("gpt-reserve")).toBe(true);
+    expect(registryIds).toContain("gpt-reserve");
   });
 });
 
 describe("Codex registry — still-live models kept (#4202 regression guard)", () => {
   it("gpt-5.6-sol still present", () => {
-    expect(catalogSrc).toContain('"gpt-5.6-sol"');
-      expect(codexModelIds.has("gpt-5.6-sol")).toBe(true);
+    expect(registryIds).toContain("gpt-5.6-sol");
   });
 
   it("gpt-5.6-terra still present", () => {
-    expect(catalogSrc).toContain('"gpt-5.6-terra"');
-      expect(codexModelIds.has("gpt-5.6-terra")).toBe(true);
+    expect(registryIds).toContain("gpt-5.6-terra");
   });
 
   it("gpt-6-astra still present", () => {
-    expect(catalogSrc).toContain('"gpt-6-astra"');
-      expect(codexModelIds.has("gpt-6-astra")).toBe(true);
+    expect(registryIds).toContain("gpt-6-astra");
   });
 });
 
