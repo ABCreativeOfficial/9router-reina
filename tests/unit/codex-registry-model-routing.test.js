@@ -13,68 +13,65 @@
  */
 
 import { describe, it, expect } from "vitest";
-import fs from "fs";
-import path from "path";
+import { getProviderModels } from "../../open-sse/config/providerModels.js";
 
 // ── #4202 Registry checks ────────────────────────────────────────────────────
-
-const codexSrc = fs.readFileSync(
-  path.resolve("../open-sse/providers/registry/codex.js"),
-  "utf-8"
-);
+// The registry generates its model list from the shared Codex capability map
+// (open-sse/config/codexModels.js), so these assert the RESOLVED ids rather than
+// string literals in the registry source — the literals no longer exist there.
+const registryIds = getProviderModels("cx").map((m) => m.id);
 
 describe("Codex registry — ghost models removed (#4202)", () => {
   it("gpt-5.4 is removed", () => {
-    // Match only a standalone entry, not inside gpt-5.4-mini or gpt-5.45 etc.
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.4"/);
+    expect(registryIds).not.toContain("gpt-5.4");
   });
 
   it("gpt-5.4-mini is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.4-mini"/);
+    expect(registryIds).not.toContain("gpt-5.4-mini");
   });
 
   it("gpt-5.3-codex-spark is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.3-codex-spark"/);
+    expect(registryIds).not.toContain("gpt-5.3-codex-spark");
   });
 
   it("gpt-5.4-image is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.4-image"/);
+    expect(registryIds).not.toContain("gpt-5.4-image");
   });
 
   it("gpt-5.5 is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.5"/);
+    expect(registryIds).not.toContain("gpt-5.5");
   });
 
   it("gpt-5.5-image is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.5-image"/);
+    expect(registryIds).not.toContain("gpt-5.5-image");
   });
 
   it("gpt-5.3-image is removed", () => {
-    expect(codexSrc).not.toMatch(/id:\s*"gpt-5\.3-image"/);
+    expect(registryIds).not.toContain("gpt-5.3-image");
   });
 });
 
 describe("Codex registry — new models added (#4202)", () => {
   it("gpt-daybreak-blue-latest is present", () => {
-    expect(codexSrc).toContain('"gpt-daybreak-blue-latest"');
+    expect(registryIds).toContain("gpt-daybreak-blue-latest");
   });
 
   it("gpt-reserve is present", () => {
-    expect(codexSrc).toContain('"gpt-reserve"');
+    expect(registryIds).toContain("gpt-reserve");
   });
 });
 
 describe("Codex registry — still-live models kept (#4202 regression guard)", () => {
   it("gpt-5.6-sol still present", () => {
-    expect(codexSrc).toContain('"gpt-5.6-sol"');
+    expect(registryIds).toContain("gpt-5.6-sol");
   });
 
   it("gpt-5.6-terra still present", () => {
-    expect(codexSrc).toContain('"gpt-5.6-terra"');
+    expect(registryIds).toContain("gpt-5.6-terra");
   });
 
   it("gpt-6-astra still present", () => {
-    expect(codexSrc).toContain('"gpt-6-astra"');
+    expect(registryIds).toContain("gpt-6-astra");
   });
 });
 

@@ -5,10 +5,13 @@ describe("getThinkingLevels", () => {
   it.each([
     ["gpt-6-astra", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]],
     ["gpt-6-sol", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]],
+    ["gpt-6.1-sol", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]],
     ["gpt-6-luna", ["none", "minimal", "low", "medium", "high", "xhigh", "max"]],
     ["gpt-5.6-sol", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]],
     ["gpt-5.6-terra", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]],
     ["gpt-5.6-luna", ["none", "minimal", "low", "medium", "high", "xhigh", "max"]],
+    // Official catalog (visibility "hide") ships full levels for daybreak.
+    ["gpt-daybreak-blue-latest", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]],
     // Official catalog stops at xhigh for GPT-5.5.
     ["gpt-5.5", ["none", "minimal", "low", "medium", "high", "xhigh"]],
   ])("returns the official per-model levels for %s", (model, expected) => {
