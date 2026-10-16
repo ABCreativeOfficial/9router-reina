@@ -7,12 +7,7 @@ import Input from "@/shared/components/Input";
 import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
 import SegmentedControl from "@/shared/components/SegmentedControl";
-
-/** Drop a request-time `(level)` suffix so a legacy entry maps onto its base model. */
-function baseId(id) {
-  const m = String(id ?? "").trim().match(/^(.*)\(([^()]+)\)\s*$/);
-  return (m ? m[1] : String(id ?? "")).trim();
-}
+import { stripReasoningLevelSuffix } from "open-sse/translator/concerns/thinking.js";
 
 /**
  * Per-account Model Access modal.
@@ -21,6 +16,10 @@ function baseId(id) {
  * per model: an entry grants its model at every thinking level, so no level variants are
  * listed here. Model choices come from the caller, which shares one catalog builder with
  * the provider page's Available Models grid.
+ *
+ * Stored ids are shown as the policy will read them back, using the same helper the
+ * policy uses. It strips a real `(level)` suffix only, so a Codex `-(fast)` alias keeps
+ * its id instead of rendering as a truncated `gpt-6-sol-`.
  */
 export default function ModelAccessModal({ isOpen, connection, entries, onSave, onClose }) {
   const [draft, setDraft] = useState([]);
@@ -34,7 +33,7 @@ export default function ModelAccessModal({ isOpen, connection, entries, onSave, 
     const stored = Array.isArray(connection?.providerSpecificData?.enabledModels)
       ? connection.providerSpecificData.enabledModels
       : [];
-    setDraft(Array.from(new Set(stored.map(baseId).filter(Boolean))));
+    setDraft(Array.from(new Set(stored.map(stripReasoningLevelSuffix).filter(Boolean))));
     setQuery("");
   }
 

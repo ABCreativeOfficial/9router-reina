@@ -26,7 +26,7 @@
 export const CODEX_CATALOG_SOURCE = "openai/codex codex-rs/models-manager/models.json";
 
 /** Highest official Codex CLI version this fork identifies as. */
-export const CODEX_CLI_VERSION = "0.159.0";
+export const CODEX_CLI_VERSION = "0.163.0";
 
 /** Virtual-alias markers. `fast` is a service tier, never a reasoning level. */
 export const CODEX_FAST_MARKER = "fast";
@@ -45,10 +45,11 @@ export const CODEX_MODEL_CAPABILITIES = {
   "gpt-6.1-sol": {
     name: "GPT 6.1 Sol",
     displayName: "GPT-6.1-Sol",
-    defaultReasoning: "medium",
-    reasoning: ["low", "medium", "high", "xhigh", "max"],
+    defaultReasoning: "low",
+    reasoning: ["low", "medium", "high", "xhigh", "max", "ultra"],
     fast: true,
     responsesLite: true,
+    extendedContext: true,
     contextWindow: 272000,
     maxOutput: 128000,
     vision: true,
@@ -137,17 +138,20 @@ export const CODEX_MODEL_CAPABILITIES = {
     maxOutput: 128000,
     vision: true,
   },
-  // Confirmed live via backend-api/codex/models (#4202). No public reasoning
-  // picker entry upstream, so they carry the default reasoning set only.
+  // Official catalog `visibility: "hide"` entry, kept public here because the
+  // ChatGPT backend serves it (confirmed live, #4202). Values mirror the official
+  // entry: default `low`, levels through `ultra`, 872k max context, no Fast tier.
   "gpt-daybreak-blue-latest": {
     name: "GPT Daybreak Blue",
     displayName: "GPT-Daybreak-Blue",
-    defaultReasoning: "medium",
-    reasoning: ["low", "medium", "high", "xhigh"],
+    defaultReasoning: "low",
+    reasoning: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    extendedContext: true,
     contextWindow: 272000,
     maxOutput: 128000,
     vision: true,
   },
+  // Not in the official catalog; confirmed live via backend-api/codex/models (#4202).
   "gpt-reserve": {
     name: "GPT Reserve",
     displayName: "GPT-Reserve",
@@ -215,20 +219,25 @@ export function matchCodexBaseModel(modelId) {
 
 /**
  * Does this id carry a Codex virtual-alias suffix (`-<effort>`, `-(fast)`,
- * `-<effort>-(fast)`) rather than being a bare canonical slug?
+ * `-<effort>-(fast)`) rather than a bare canonical slug?
  *
- * This is a pure string test against the Codex base-id list — it has no provider
- * awareness, so a *different* provider's model that happens to extend a Codex
- * base (Kiro's `gpt-5.6-sol-thinking`) also returns true. Callers must gate it on
- * the codex provider themselves; the provider page does exactly that.
+ * Provider-scoped by contract: any provider other than `codex` returns false, so
+ * a caller cannot suppress a legitimate `(level)` suffix on another provider's
+ * model that merely extends a Codex base id (Kiro's `gpt-5.6-sol-thinking`). The
+ * dash-form alias grammar is a Codex-only custom feature, so `providerId` is a
+ * required argument rather than something each caller has to remember to check.
  *
  * Used by the provider page, which appends a `(level)` suffix to a model's label
  * when a thinking mode is selected. Applying that to an alias would encode the
  * effort twice — `gpt-6-sol-low` + `(high)` becomes `gpt-6-sol-low(high)`, a
  * contradictory combination the alias parser rejects. Such ids are skipped: the
  * alias already states its own effort.
+ *
+ * @param {string} modelId - the model id to test
+ * @param {string} providerId - resolved provider id (only "codex" can match)
  */
-export function codexIdEncodesEffortOrTier(modelId) {
+export function codexIdEncodesEffortOrTier(modelId, providerId) {
+  if (providerId !== "codex") return false;
   if (typeof modelId !== "string") return false;
   const match = matchCodexBaseModel(modelId.trim());
   return !!match && match.rest !== "";

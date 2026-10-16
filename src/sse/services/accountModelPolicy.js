@@ -16,6 +16,7 @@
 
 import { getProviderAlias } from "@/shared/constants/providers";
 import { getProviderConnections } from "@/lib/localDb";
+import { isReasoningLevelSuffix } from "open-sse/translator/concerns/thinking.js";
 
 // Guard against a runaway payload; generous enough for the largest provider catalogs.
 export const MAX_ENABLED_MODELS = 500;
@@ -23,12 +24,17 @@ export const MAX_ENABLED_MODELS = 500;
 /**
  * Split a request-time thinking suffix off a model id: `m(xhigh)` → base `m`, level `xhigh`.
  * Mirrors the `(...)` shape parsed by translator/concerns/thinkingUnified.js.
+ *
+ * Only a REAL reasoning level is stripped. A trailing `(...)` that is part of the
+ * id — Codex's `-(fast)` service-tier marker — is left intact, because stripping it
+ * would store `gpt-6-sol-` (a dangling separator that matches no model at all).
+ *
  * @returns {{ base: string, level: string|null }}
  */
 export function splitModelLevel(modelId) {
   const raw = String(modelId ?? "").trim();
   const m = raw.match(/^(.*)\(([^()]+)\)\s*$/);
-  if (!m) return { base: raw, level: null };
+  if (!m || !isReasoningLevelSuffix(m[2])) return { base: raw, level: null };
   return { base: m[1].trim(), level: m[2].trim().toLowerCase() };
 }
 

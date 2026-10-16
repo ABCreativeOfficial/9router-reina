@@ -58,6 +58,7 @@ describe("Codex public catalog matches the official visible list", () => {
   });
 
   it("carries the official reasoning sets, including the models that stop early", () => {
+    expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-sol"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-sol"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-astra"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-luna"].reasoning).not.toContain("ultra");
@@ -67,6 +68,7 @@ describe("Codex public catalog matches the official visible list", () => {
   });
 
   it("carries the official per-model default reasoning", () => {
+    expect(getCodexDefaultReasoning("gpt-6.1-sol")).toBe("low");
     expect(getCodexDefaultReasoning("gpt-6-astra")).toBe("low");
     expect(getCodexDefaultReasoning("gpt-6-sol")).toBe("medium");
     expect(getCodexDefaultReasoning("gpt-6-luna")).toBe("medium");
@@ -74,6 +76,9 @@ describe("Codex public catalog matches the official visible list", () => {
     expect(getCodexDefaultReasoning("gpt-5.6-terra")).toBe("medium");
     expect(getCodexDefaultReasoning("gpt-5.6-luna")).toBe("medium");
     expect(getCodexDefaultReasoning("gpt-5.5")).toBe("medium");
+    // 872k max context in the official entry → the [1m] variant is generated.
+    expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-sol"].extendedContext).toBe(true);
+    expect(CODEX_MODEL_CAPABILITIES["gpt-daybreak-blue-latest"].extendedContext).toBe(true);
   });
 
   it("publishes every visible model through the registry", () => {
@@ -300,7 +305,7 @@ describe("thinking suffix is never stacked onto a Codex alias", () => {
       // An alias is anything carrying `-<effort>`, `-(fast)` or both; a canonical
       // slug and its `[1m]` variant carry neither.
       const expected = id.includes("-(") || /-(low|medium|high|xhigh|max|ultra)$/.test(id);
-      expect(codexIdEncodesEffortOrTier(id), id).toBe(expected);
+      expect(codexIdEncodesEffortOrTier(id, "codex"), id).toBe(expected);
     }
   });
 
@@ -309,7 +314,7 @@ describe("thinking suffix is never stacked onto a Codex alias", () => {
     // request: this is the 400 the user would have hit from the UI label.
     const stacked = [];
     for (const id of listCodexPublicModelIds()) {
-      if (!codexIdEncodesEffortOrTier(id)) continue;
+      if (!codexIdEncodesEffortOrTier(id, "codex")) continue;
       for (const level of LEVELS) {
         const label = `${id}(${level})`;
         if (parseCodexModelReference(label).ok === false) stacked.push(label);
@@ -324,37 +329,47 @@ describe("thinking suffix is never stacked onto a Codex alias", () => {
 
   it("leaves a canonical model and its [1m] variant suffixable", () => {
     // These are the ids the thinking dropdown is actually for: one effort, stated once.
-    expect(codexIdEncodesEffortOrTier("gpt-6-sol")).toBe(false);
-    expect(codexIdEncodesEffortOrTier("gpt-6-sol[1m]")).toBe(false);
+    expect(codexIdEncodesEffortOrTier("gpt-6-sol", "codex")).toBe(false);
+    expect(codexIdEncodesEffortOrTier("gpt-6-sol[1m]", "codex")).toBe(false);
     expect(parseCodexModelReference("gpt-6-sol(high)").ok).toBe(true);
   });
 
   it("does not claim unknown or foreign ids", () => {
     for (const id of ["my-custom-model", "grok-4.5-high", "claude-sonnet-4.5", "", null, undefined]) {
-      expect(codexIdEncodesEffortOrTier(id), String(id)).toBe(false);
+      expect(codexIdEncodesEffortOrTier(id, "codex"), String(id)).toBe(false);
     }
   });
 
-  it("is gated to the codex provider at the call site", () => {
-    // The predicate itself is not provider-aware (Kiro's `gpt-5.6-sol-thinking`
-    // also extends a Codex base), so the page must gate it on the provider.
-    expect(codexIdEncodesEffortOrTier("gpt-5.6-sol-thinking")).toBe(true);
+  it("scopes itself to the codex provider, so no caller can forget the gate", () => {
+    // The dash-form alias grammar is Codex-only. Another provider's model that
+    // extends a Codex base id must never be treated as one of our aliases — the
+    // predicate answers false for it, which is what makes the call site safe.
+    expect(codexIdEncodesEffortOrTier("gpt-5.6-sol-thinking", "codex")).toBe(true);
+    expect(codexIdEncodesEffortOrTier("gpt-5.6-sol-thinking", "kiro")).toBe(false);
+    expect(codexIdEncodesEffortOrTier("gpt-5.6-sol-low", "openai")).toBe(false);
+    // A missing/absent provider is not codex either.
+    expect(codexIdEncodesEffortOrTier("gpt-6-sol-low")).toBe(false);
+    expect(codexIdEncodesEffortOrTier("gpt-6-sol-low", undefined)).toBe(false);
+    expect(codexIdEncodesEffortOrTier("gpt-6-sol-low", null)).toBe(false);
+  });
 
+  it("is called with the provider from the page, before the level lookup", () => {
     const PAGE = read("../../src/app/(dashboard)/dashboard/providers/[id]/page.js");
-    expect(PAGE).toContain('const isCodexProvider = providerId === "codex"');
-    expect(PAGE).toContain("if (isCodexProvider && codexIdEncodesEffortOrTier(modelId)) return null;");
-    // The guard must run before the level lookup, so no suffix is ever produced.
-    const guardIndex = PAGE.indexOf("codexIdEncodesEffortOrTier(modelId)) return null");
+    // The guard passes the resolved provider, so the scoping lives in the helper
+    // rather than in a separate boolean the call site could drop.
+    expect(PAGE).toContain("codexIdEncodesEffortOrTier(modelId, providerId)");
+    expect(PAGE).not.toContain("isCodexProvider");
+    const guardIndex = PAGE.indexOf("codexIdEncodesEffortOrTier(modelId, providerId)) return null");
     const lookupIndex = PAGE.indexOf("const levels = getThinkingLevels(providerId, modelId);");
     expect(guardIndex).toBeGreaterThan(-1);
     expect(lookupIndex).toBeGreaterThan(guardIndex);
   });
 
   it("leaves non-Codex providers' labels unchanged", () => {
-    // Kiro's suffixable ids must still get their level appended: the page gate is
-    // provider-scoped, so the predicate returning true for them is harmless.
+    // Kiro's suffixable ids must still get their level appended: the predicate is
+    // provider-scoped, so it answers false for them and the suffix is not suppressed.
     const PAGE = read("../../src/app/(dashboard)/dashboard/providers/[id]/page.js");
-    expect(PAGE).toContain("providerId === \"codex\"");
+    expect(PAGE).toContain("codexIdEncodesEffortOrTier(modelId, providerId)");
     // Nothing else appends the suffix.
     const MODAL = read("../../src/shared/components/ModelSelectModal.js");
     expect(MODAL).not.toContain("thinkingSuffix");
