@@ -212,9 +212,6 @@ export default function ProviderDetailPage() {
     : providerId === "kimi" ? "Kimi API Key"
     : (providerId === "qoder" || providerId === "qoder-cn") ? "PAT"
     : "API Key";
-  // Codex virtual aliases carry their effort/tier in the id itself, so the
-  // thinking-mode suffix must not be added on top of them (see below).
-  const isCodexProvider = providerId === "codex";
   // Resolve suffix "(level)" for a model when a thinking level is picked and the model supports it.
   const resolveThinkingSuffix = (modelId) => {
     if (!thinkingMode || thinkingMode === "auto") return null;
@@ -222,8 +219,9 @@ export default function ProviderDetailPage() {
     // (`<base>-<effort>`, `<base>-(fast)`). Appending "(level)" would state the
     // effort twice — the label would read `gpt-6-sol-low(high)` and the alias
     // parser rejects that contradictory combination. The alias is the effort, so
-    // no suffix is added for it.
-    if (isCodexProvider && codexIdEncodesEffortOrTier(modelId)) return null;
+    // no suffix is added for it. The predicate is provider-scoped internally, so
+    // another provider's suffixable id is never affected.
+    if (codexIdEncodesEffortOrTier(modelId, providerId)) return null;
     const levels = getThinkingLevels(providerId, modelId);
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
