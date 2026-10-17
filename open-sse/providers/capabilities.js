@@ -325,7 +325,6 @@ export const PROVIDER_CAPABILITIES = {
     "gpt-5.6-terra-review":      CODEX_GPT_56_DEFAULT_CAPS,
     "gpt-5.6-luna":              CODEX_GPT_56_DEFAULT_CAPS,
     "gpt-5.6-luna-review":       CODEX_GPT_56_DEFAULT_CAPS,
-    "gpt-5.5":                   CODEX_GPT_56_DEFAULT_CAPS,
     // Official catalog marks this `visibility: "hide"`; kept so the bare id Codex
     // CLI sends for auto-review resolves with real limits instead of the floor.
     "codex-auto-review":         { vision: false, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 },
