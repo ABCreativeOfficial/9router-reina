@@ -45,6 +45,14 @@
 
 # v0.5.104 (2026-10-15)
 
+## Fixes (fork: CodeBuddy Intl / CBAI Global)
+- **CodeBuddy Intl**: every chat request now carries the conversation-correlation header family the gateway's channel verification demands (`X-Conversation-ID` UUIDv7, `X-Conversation-Request-ID`/`X-Root-Request-ID`, `X-Conversation-Message-ID`/`X-Request-ID`, plus the W3C/B3 trace family). Ids are memoised per conversation with a TTL, so retries and account failover keep the same id while separate conversations never collide; case-variant duplicates are collapsed and caller/override values are preserved.
+- **CodeBuddy Intl**: `providerOverrides` is merged after `buildHeaders`, so a new post-merge `finalizeHeaders` hook re-asserts the family. Without it an override written in a different case left two keys, which the fetch layer joins into one comma-separated value.
+- **CodeBuddy Intl**: the system prompt is no longer discarded. Live A/B against the gateway showed the content filter rejects exactly one leading sentence (`You are Claude Code, Anthropic's official CLI for Claude.`); only that sentence is neutralised now, and Claude Code's tool policy, security rules and working instructions survive verbatim. A leading `developer` message is folded into the system prompt instead of dropped, and a mid-conversation system turn becomes a user turn rather than being hoisted.
+- **CodeBuddy Intl**: `parseError` classifies the whole 400 vocabulary — 11128 channel verification (both the `conversation id missing` and the newer `Illegal API invocation from an unapproved channel` wording), 11128 `first message is not system prompt`, 11102 model-not-found as 404 so combos fall through, 11101 non-stream, and illegal-request — instead of returning a bare body.
+- **CodeBuddy Intl**: identity headers and the `codebuddy.ai` endpoint are deliberately unchanged. `codebuddy.ai` and `workbuddy.ai` resolve to the same host, and live A/B showed identity/domain make no difference to the gate.
+- **Tests**: `tests/unit/codebuddy-intl-conversation-headers.test.js` covers id shapes/relationships, retry and failover stability, per-conversation isolation, case-insensitive merge, override conflicts, message normalisation, every error variant, and a Claude Code → translator → executor regression.
+
 ## Features
 - **Gemini**: add Gemini 4 Argon (`gemini`/`vertex`, plus a `high` tier on Antigravity) — non-dismissible gemini-level thinking, 1M context, Vertex defaults to `global` location
 - **Usage**: Cursor IDE quota via DashboardService (spend + request buckets) (#4689)
