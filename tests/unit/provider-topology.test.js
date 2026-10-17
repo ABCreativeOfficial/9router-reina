@@ -76,4 +76,38 @@ describe("Usage & Analytics provider topology", () => {
     ], [node]);
     expect(providers).toEqual([]);
   });
+
+  it("drops a leftover connection whose provider cannot be resolved", () => {
+    // A test seed / orphan row has no registry entry, no provider node and no
+    // dynamic markers. It must not become a graph node the router cannot route.
+    const providers = buildProviderTopologyProviders([
+      { id: "x", provider: "openai-compatible-upd-1790662141806", name: "seed-0", isActive: true },
+    ], []);
+    expect(providers).toEqual([]);
+  });
+
+  it("keeps a dynamic provider that carries its own markers without a node", () => {
+    const providers = buildProviderTopologyProviders([
+      {
+        id: "d1",
+        provider: "openai-compatible-chat-generated",
+        name: "account",
+        isActive: true,
+        providerSpecificData: { newApiOrigin: "https://example.com", newApiLabel: "Example" },
+      },
+    ], []);
+    expect(providers).toHaveLength(1);
+    expect(providers[0]).toMatchObject({
+      provider: "openai-compatible-chat-generated",
+      label: "Example",
+      isNewApi: true,
+    });
+  });
+
+  it("keeps a provider the caller resolves outside the registry", () => {
+    const providers = buildProviderTopologyProviders([
+      { id: "k", provider: "runtime-provider", name: "account", isActive: true },
+    ], [], { isKnownProvider: (id) => id === "runtime-provider" });
+    expect(providers.map((provider) => provider.provider)).toEqual(["runtime-provider"]);
+  });
 });
