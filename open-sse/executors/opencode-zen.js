@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { DefaultExecutor } from "./default.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { isMuseSparkModel, isOpencodeFreeTierModel } from "../providers/models/helpers.js";
+import { computeOpencodeRetryDelay, parseOpencodeError } from "../utils/opencodeLane.js";
 import {
   normalizeResponsesInput,
   clampResponsesCallId,
@@ -263,6 +264,17 @@ export class OpenCodeZenExecutor extends DefaultExecutor {
   async execute(args) {
     const credentials = this.prepareRequestCredentials(args);
     return super.execute({ ...args, credentials });
+  }
+
+  // Same lane policy as the free executor: retry the transient route 429 a
+  // bounded number of times, never a quota 429.
+  computeRetryDelay(response, attempt) {
+    return computeOpencodeRetryDelay(response, attempt);
+  }
+
+  // Same classification as the free lane (see utils/opencodeLane.js).
+  parseError(response, bodyText) {
+    return parseOpencodeError(response, bodyText);
   }
 
   buildHeaders(credentials, stream = true, url, model) {

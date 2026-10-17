@@ -1,6 +1,8 @@
 // Concern: reasoning_effort ↔ provider-native thinking config.
-// Central source of truth for level↔budget maps (web-standard values).
-// Provider-specific application lives in thinkingUnified.js; this file is maps-only.
+// Central source of truth for level↔budget maps (web-standard values), the level
+// vocabulary, and the capability-driven fit (resolveReasoningLevel) that every
+// per-format mapping calls instead of hardcoding its own collapse.
+// Provider-specific application lives in thinkingUnified.js.
 //
 // It also owns the level VOCABULARY (`isReasoningLevelSuffix`), because a
 // trailing `(value)` on a model id is only a thinking suffix when `value` names
@@ -83,6 +85,65 @@ export function budgetToLevel(budget) {
   if (b <= 28672) return "high";
   if (b <= 80384) return "xhigh";
   return "max";
+}
+
+// "ultra" sits above EFFORT_LEVELS (it is a Codex-only tier). It ranks one step
+// past "max" so an unsupported ultra resolves to the highest level a model
+// actually declares instead of being dropped to a hardcoded mid level.
+const LEVEL_RANK = new Map([...EFFORT_LEVELS, "ultra"].map((l, i) => [l, i]));
+
+/**
+ * Is `value` a level the wire vocabulary knows (minimal..max, or ultra)?
+ * False for pass-through words (`auto`, `off`) and for arbitrary client strings,
+ * so a caller can refuse to write a token upstream would reject.
+ */
+export function isReasoningLevel(value) {
+  return LEVEL_RANK.has(typeof value === "string" ? value.trim().toLowerCase() : value);
+}
+
+/**
+ * Fit a requested effort to what a model actually accepts.
+ *
+ * `supportedLevels` comes from getThinkingLevels() (capability-declared set, a
+ * pattern override, or the format default). Rules:
+ *   - supported → returned unchanged, never upgraded or downgraded
+ *   - unsupported → nearest supported level; ties prefer the HIGHER one, so a
+ *     request is never silently downgraded when both neighbours are equidistant
+ *   - "none" never acts as a fallback target (it is a disable switch, not a
+ *     level), and no level set at all means "capability unknown" → unchanged
+ *
+ * This replaces the per-format hardcoded collapses (`xhigh|max → max`,
+ * `low|medium → high`, `max|ultra → xhigh`) that threw away levels the upstream
+ * accepts natively — live-probed on OpenCode Free, where
+ * `deepseek-v4.1-flash-free` takes every level it declares and `big-pickle`
+ * rejects the "minimal"/"xhigh" its format default used to offer.
+ */
+export function resolveReasoningLevel(level, supportedLevels) {
+  const raw = typeof level === "string" ? level.trim().toLowerCase() : "";
+  if (!raw) return level;
+  if (!Array.isArray(supportedLevels) || supportedLevels.length === 0) return level;
+  if (supportedLevels.includes(raw)) return raw;
+
+  const target = LEVEL_RANK.get(raw);
+  // Not a reasoning level ("auto", an unknown token) — leave it to the caller.
+  if (target === undefined) return level;
+
+  const candidates = supportedLevels
+    .filter((l) => l !== "none" && LEVEL_RANK.has(l))
+    .map((l) => ({ level: l, rank: LEVEL_RANK.get(l) }));
+  // Nothing rankable declared (e.g. a format that only names a toggle like
+  // "thinking"): there is no level to land on, so the caller decides.
+  if (candidates.length === 0) return null;
+
+  let best = candidates[0];
+  for (const candidate of candidates) {
+    const distance = Math.abs(candidate.rank - target);
+    const bestDistance = Math.abs(best.rank - target);
+    if (distance < bestDistance || (distance === bestDistance && candidate.rank > best.rank)) {
+      best = candidate;
+    }
+  }
+  return best.level;
 }
 
 // Gemini thinkingBudget (numeric) → OpenAI reasoning_effort (antigravity reverse map).

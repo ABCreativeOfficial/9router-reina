@@ -21,6 +21,10 @@ export default {
   transport: {
     baseUrl: "https://opencode.ai/zen/v1/chat/completions",
     headers: {},
+    // Same bounded 429 policy as the free lane (utils/opencodeLane.js).
+    retry: {
+      429: { attempts: 2, delayMs: 500 },
+    },
     usage: {
       url: "https://opencode.ai/zen/v1/usage",
     },
