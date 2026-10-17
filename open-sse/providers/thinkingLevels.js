@@ -47,6 +47,30 @@ const PATTERN_THINKING = [
   { pattern: "*claude*4.6*", levels: CLAUDE_NO_XHIGH },
   { pattern: "*claude*4-6*", levels: CLAUDE_NO_XHIGH },
   { pattern: "*codex*", levels: ["low", "medium", "high", "xhigh"] }, // codex cannot disable thinking
+  // OpenCode Free lane (/inference/v1, probed live): these ids accept every level
+  // they are given, including ones the generic patterns withhold from their paid
+  // siblings. Provider-scoped on purpose — the opencode-go entries further down
+  // are narrower because THOSE backends 400 on "max". A declared set is both the
+  // picker's option list and the fitting target, so a wrong ceiling silently
+  // rewrites a client's native level (max → xhigh) instead of sending it.
+  // Verified on /inference: deepseek-v4.1-flash-free and glm-5.3-flash-free answer
+  // 200 for every level including "minimal" and "max"; mimo-v2.6-flash-free for max.
+  { provider: "opencode", pattern: "*mimo*v2.6*", levels: ["none", "low", "medium", "high", "xhigh", "max"] },
+  { provider: "opencode", pattern: "*deepseek-v4.1-flash-free*", levels: ["none", "minimal", "low", "medium", "high", "xhigh", "max"] },
+  { provider: "opencode", pattern: "*glm-5.3-flash-free*", levels: ["none", "minimal", "low", "medium", "high", "xhigh", "max"] },
+  // Same gateway on the Zen lane: mimo-v2.6-flash-free answers 200 for max there too.
+  { provider: "opencode-zen", pattern: "*mimo*v2.6*", levels: ["none", "low", "medium", "high", "xhigh", "max"] },
+  // Zen lane GLM-5.3-Flash: vendor docs and the reference proxy
+  // (OnesoftQwQ/opencode-go-copilot v1.11.1) both state low|high|max only, and
+  // the lane could not be probed cleanly (every level request answered the
+  // transient route 429). Declaring the documented set keeps "max" intact rather
+  // than letting the openai format default silently fit it down to "xhigh".
+  { provider: "opencode-zen", pattern: "*glm-5.3-flash-free*", levels: ["low", "high", "max"] },
+  // big-pickle's own enum is none|low|medium|high — the old format default offered
+  // "minimal" and "xhigh", and upstream answers 400: `reasoning_effort must be one
+  // of 'none', 'low', 'medium' or 'high'.` (probed live, retried; the free lane is
+  // what was probed, and the enum comes from the model server).
+  { pattern: "*big-pickle*", levels: ["none", "low", "medium", "high"] },
   { pattern: "*mimo*v2.6*", levels: ["none", "low", "medium", "high", "xhigh"] },
   // mimo-v2.5-pro on opencode-go rejects reasoning_effort "max" (probed live); v2.5 accepts it.
   { pattern: "*mimo*v2.5-pro*", levels: ["none", "low", "medium", "high", "xhigh"] },

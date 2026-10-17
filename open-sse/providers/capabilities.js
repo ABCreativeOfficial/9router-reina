@@ -136,11 +136,17 @@ export const MODEL_CAPABILITIES = {
   // With it left true, applyThinking emitted enable_thinking:false whenever a
   // turn asked for no reasoning, and z.ai answered 400 code 1210 "Invalid API
   // parameter" — intermittently, because only some turns ask. #4409
-  "glm-5.3-flash":     { vision: true, videoInput: true, pdf: true, reasoning: true, thinkingFormat: "zai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 131072 },
+  // thinkingEffortSupported restates the *glm-5.3* pattern's flag: an exact entry
+  // short-circuits the pattern table, so omitting it silently dropped
+  // reasoning_effort for this id (z.ai reads it from 5.2 onward).
+  "glm-5.3-flash":     { vision: true, videoInput: true, pdf: true, reasoning: true, thinkingFormat: "zai", thinkingCanDisable: false, thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 131072 },
   "glm-4.6v":          { vision: true, videoInput: true, reasoning: true, thinkingFormat: "zai", contextWindow: 128000, maxOutput: 32768 },
   "glm-4.5v":          { vision: true, videoInput: true, reasoning: true, thinkingFormat: "zai", contextWindow: 64000, maxOutput: 16384 },
-  // GLM-5.2 has 1M context — pattern *glm-5* only gives 200k, so override here
-  "glm-5.2":           { reasoning: true, thinkingFormat: "zai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 131072 },
+  // GLM-5.2 has 1M context — pattern *glm-5* only gives 200k, so override here.
+  // thinkingEffortSupported restates what the *glm-5.2* pattern declares: an
+  // exact entry short-circuits the pattern table, so omitting it silently
+  // dropped reasoning_effort for this id (z.ai reads it from 5.2 onward).
+  "glm-5.2":           { reasoning: true, thinkingFormat: "zai", thinkingCanDisable: false, thinkingEffortSupported: true, contextWindow: 1000000, maxOutput: 131072 },
 
   // DeepSeek's first V4 model with image input; text limits match V4-Flash.
   "deepseek-v4-flash-vision-exp": { vision: true, reasoning: true, thinkingFormat: "deepseek", contextWindow: 1000000, maxOutput: 384000 },
@@ -224,6 +230,22 @@ export const PROVIDER_CAPABILITIES = {
   // glm-5.3-flash on OpenCode Go is served by a backend that rejects the z.ai
   // `thinking` object (400: unknown field "thinking") and wants reasoning_effort.
   // Overrides the global entry, whose z.ai shape is correct for z.ai itself.
+  // OpenCode Free lane: the free GLM rejects the z.ai `thinking` object outright
+  // (400 `unknown field "thinking"`, probed live) and takes a plain
+  // reasoning_effort at every level it declares. Overrides the global *glm-5.3*
+  // pattern, whose z.ai shape is right for z.ai itself. Limits are the models.dev
+  // values for this id, stated here because a provider override short-circuits
+  // before the catalog overlay that would otherwise supply them.
+  "opencode": {
+    "glm-5.3-flash-free": { vision: true, videoInput: true, pdf: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 32000 },
+  },
+  // Same id on the Zen lane (/zen/v1). Probed live on that endpoint too: the
+  // gateway answers 400 `invalid request body: json: unknown field "thinking"`
+  // for the thinking object and 200 for a plain reasoning_effort, so the zai
+  // shape the global *glm-5.3* pattern assigns is wrong here as well.
+  "opencode-zen": {
+    "glm-5.3-flash-free": { vision: true, videoInput: true, pdf: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 200000, maxOutput: 32000 },
+  },
   "opencode-go": {
     "glm-5.3-flash": { vision: true, videoInput: true, pdf: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 131072 },
     // OpenCode Go's claude-haiku-5-5 rejects `thinking.type.enabled` — the shape the

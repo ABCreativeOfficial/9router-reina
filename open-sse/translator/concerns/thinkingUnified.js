@@ -5,7 +5,7 @@
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 import { getThinkingLevels } from "../../providers/thinkingLevels.js";
 import { PROVIDERS } from "../../providers/index.js";
-import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel, isReasoningLevelSuffix } from "./thinking.js";
+import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel, isReasoningLevel, isReasoningLevelSuffix, resolveReasoningLevel } from "./thinking.js";
 
 // Map a target wire-format to its native thinking format (when capability has none).
 const FORMAT_TO_NATIVE = {
@@ -170,11 +170,13 @@ function toLevel(cfg) {
   return null;
 }
 
+// Effort on the OpenAI wire is capability-resolved, not a blanket
+// `max|ultra → xhigh` rewrite: a model that declares "max" keeps it (the
+// OpenCode free lane takes every level it declares — probed live), and one whose
+// enum stops lower gets the nearest DECLARED level instead of a hardcoded value
+// it may reject with 400 (big-pickle: none|low|medium|high only).
 function normalizeOpenAILevel(level, supportedLevels) {
-  if (level !== "max" && level !== "ultra") return level;
-  if (supportedLevels?.includes(level)) return level;
-  if (level === "ultra" && supportedLevels?.includes("max")) return "max";
-  return "xhigh";
+  return resolveReasoningLevel(level, supportedLevels) ?? level;
 }
 
 function toGeminiThinkingLevel(cfg) {
@@ -182,13 +184,19 @@ function toGeminiThinkingLevel(cfg) {
   return effortToThinkingLevel(raw);
 }
 
-function toKimiReasoningEffort(cfg) {
+// Resolve a level against the model's declared set, but only ever return a real
+// wire level. Formats that never forwarded an unknown client string (deepseek,
+// kimi) must not start doing so now that resolution is capability-driven.
+function fitLevel(level, supportedLevels) {
+  const resolved = resolveReasoningLevel(level, supportedLevels);
+  return isReasoningLevel(resolved) ? (typeof resolved === "string" ? resolved.trim().toLowerCase() : resolved) : null;
+}
+
+function toKimiReasoningEffort(cfg, supportedLevels) {
   const level = toLevel(cfg);
   if (level === "auto") return "high";
-  if (level === "minimal") return "low";
-  if (level === "xhigh") return "max";
-  if (["low", "medium", "high", "max"].includes(level)) return level;
-  return null;
+  if (!level) return null;
+  return fitLevel(level, supportedLevels);
 }
 
 const GEMINI_LEVEL_OUTPUT_FLOOR = {
@@ -353,17 +361,21 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
     case "deepseek": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
       body.thinking = { type: "enabled" };
-      // DeepSeek: low/medium→high, xhigh/max→max. Some backends (mimo v2.5-pro/v2.6
-      // on opencode-go, probed live) 400 on "max" — clamp to high when the declared
-      // levels exclude it.
+      // Effort follows the model's declared set instead of the old blanket
+      // low/medium→high, xhigh/max→max collapse. A model that declares "xhigh"
+      // or "max" keeps the client's value (the OpenCode free lane accepts every
+      // level it declares — probed live); a backend that 400s on "max" (mimo
+      // v2.5-pro, probed live) declares no "max" and is fitted to the nearest
+      // level it does declare. Anything else ("auto", an unknown client token)
+      // keeps the pre-existing "high" default.
       const level = toLevel(eff);
-      const want = level === "xhigh" || level === "max" ? "max" : "high";
-      body.reasoning_effort = want === "max" && supportedLevels && !supportedLevels.includes("max") ? "high" : want;
+      const resolved = level ? fitLevel(isReasoningLevel(level) ? level : "high", supportedLevels) : null;
+      if (resolved) body.reasoning_effort = resolved;
       break;
     }
     case "kimi": {
       if (none && canDisable) { body.thinking = { type: "disabled" }; break; }
-      const effort = toKimiReasoningEffort(eff);
+      const effort = toKimiReasoningEffort(eff, supportedLevels);
       if (effort) body.reasoning_effort = effort;
       break;
     }
@@ -381,7 +393,7 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
     case "step": {
       if (none && canDisable) break;
       const level = toLevel(eff);
-      if (level) body.reasoning_effort = level === "xhigh" || level === "max" ? "high" : level;
+      if (level) body.reasoning_effort = normalizeOpenAILevel(level, supportedLevels);
       break;
     }
     case "nous": {
