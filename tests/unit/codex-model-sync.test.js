@@ -50,7 +50,6 @@ describe("Codex public catalog matches the official visible list", () => {
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
-      "gpt-5.5",
       // Confirmed live via backend-api/codex/models (#4202).
       "gpt-daybreak-blue-latest",
       "gpt-reserve",
@@ -63,8 +62,6 @@ describe("Codex public catalog matches the official visible list", () => {
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-astra"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-luna"].reasoning).not.toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-5.6-luna"].reasoning).not.toContain("ultra");
-    expect(CODEX_MODEL_CAPABILITIES["gpt-5.5"].reasoning).not.toContain("max");
-    expect(CODEX_MODEL_CAPABILITIES["gpt-5.5"].reasoning).not.toContain("ultra");
   });
 
   it("carries the official per-model default reasoning", () => {
@@ -75,7 +72,6 @@ describe("Codex public catalog matches the official visible list", () => {
     expect(getCodexDefaultReasoning("gpt-5.6-sol")).toBe("low");
     expect(getCodexDefaultReasoning("gpt-5.6-terra")).toBe("medium");
     expect(getCodexDefaultReasoning("gpt-5.6-luna")).toBe("medium");
-    expect(getCodexDefaultReasoning("gpt-5.5")).toBe("medium");
     // 872k max context in the official entry → the [1m] variant is generated.
     expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-sol"].extendedContext).toBe(true);
     expect(CODEX_MODEL_CAPABILITIES["gpt-daybreak-blue-latest"].extendedContext).toBe(true);
@@ -90,7 +86,7 @@ describe("Codex public catalog matches the official visible list", () => {
 
   it("drops chat models the official catalog no longer lists", () => {
     const ids = getProviderModels("cx").map((m) => m.id);
-    for (const retired of ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"]) {
+    for (const retired of ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.5"]) {
       expect(ids, retired).not.toContain(retired);
     }
   });
@@ -140,10 +136,6 @@ describe("virtual alias grammar", () => {
     expect(ids).toContain("gpt-6-luna-max-(fast)");
     expect(ids).not.toContain("gpt-6-luna-ultra");
     expect(ids).not.toContain("gpt-6-luna-ultra-(fast)");
-    // GPT-5.5 stops at xhigh.
-    expect(ids).toContain("gpt-5.5-xhigh-(fast)");
-    expect(ids).not.toContain("gpt-5.5-max");
-    expect(ids).not.toContain("gpt-5.5-ultra-(fast)");
   });
 
   it("parses base, effort and Fast without a naive dash split", () => {
@@ -164,7 +156,7 @@ describe("virtual alias grammar", () => {
   });
 
   it("rejects an unsupported combination instead of clamping it", () => {
-    for (const invalid of ["gpt-6-luna-ultra", "gpt-6-luna-ultra-(fast)", "gpt-5.6-luna-ultra-(fast)", "gpt-5.5-max", "gpt-5.5-max-(fast)", "gpt-5.5-ultra-(fast)"]) {
+    for (const invalid of ["gpt-6-luna-ultra", "gpt-6-luna-ultra-(fast)", "gpt-5.6-luna-ultra-(fast)"]) {
       const parsed = parseCodexModelReference(invalid);
       expect(parsed.ok, invalid).toBe(false);
       expect(parsed.reason, invalid).toMatch(/Unsupported Codex reasoning alias/);
@@ -194,7 +186,6 @@ describe("Codex outbound wire body", () => {
     ["gpt-5.6-sol-ultra-(fast)", "gpt-5.6-sol", "ultra"],
     ["gpt-5.6-terra-ultra-(fast)", "gpt-5.6-terra", "ultra"],
     ["gpt-5.6-luna-max-(fast)", "gpt-5.6-luna", "max"],
-    ["gpt-5.5-xhigh-(fast)", "gpt-5.5", "xhigh"],
   ];
 
   it.each(matrix)("%s → model=%s effort=%s tier=priority", (input, expectedModel, expectedEffort) => {
@@ -213,7 +204,6 @@ describe("Codex outbound wire body", () => {
       ["gpt-5.6-sol", "low"],
       ["gpt-5.6-terra", "medium"],
       ["gpt-5.6-luna", "medium"],
-      ["gpt-5.5", "medium"],
     ];
     for (const [model, expected] of matrix) {
       const body = outbound(model);
@@ -237,7 +227,6 @@ describe("Codex outbound wire body", () => {
 
   it("rejects an unsupported combination at the executor", () => {
     expect(() => outbound("gpt-6-luna-ultra-(fast)")).toThrow(/Unsupported Codex reasoning alias/);
-    expect(() => outbound("gpt-5.5-max")).toThrow(/Unsupported Codex reasoning alias/);
   });
 
   it("leaks no virtual modifier into the upstream model slug", () => {

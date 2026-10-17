@@ -12,8 +12,6 @@ describe("getThinkingLevels", () => {
     ["gpt-5.6-luna", ["none", "minimal", "low", "medium", "high", "xhigh", "max"]],
     // Official catalog (visibility "hide") ships full levels for daybreak.
     ["gpt-daybreak-blue-latest", ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]],
-    // Official catalog stops at xhigh for GPT-5.5.
-    ["gpt-5.5", ["none", "minimal", "low", "medium", "high", "xhigh"]],
   ])("returns the official per-model levels for %s", (model, expected) => {
     expect(getThinkingLevels("codex", model)).toEqual(expected);
   });
@@ -27,11 +25,6 @@ describe("getThinkingLevels", () => {
   it("does not add max for other codex models", () => {
     const levels = getThinkingLevels("codex", "gpt-5.3-codex");
     expect(levels).toEqual(["low", "medium", "high", "xhigh"]);
-  });
-
-  it("does not add max for other Codex models", () => {
-    const levels = getThinkingLevels("codex", "gpt-daybreak-blue-latest");
-    expect(levels || []).not.toContain("max");
   });
 
   it("resolves levels through a virtual alias's base model", () => {

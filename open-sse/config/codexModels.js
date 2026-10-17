@@ -127,17 +127,6 @@ export const CODEX_MODEL_CAPABILITIES = {
     maxOutput: 128000,
     vision: true,
   },
-  "gpt-5.5": {
-    name: "GPT 5.5",
-    displayName: "GPT-5.5",
-    defaultReasoning: "medium",
-    // Official catalog stops at `xhigh` — no `max`, no `ultra`.
-    reasoning: ["low", "medium", "high", "xhigh"],
-    fast: true,
-    contextWindow: 272000,
-    maxOutput: 128000,
-    vision: true,
-  },
   // Official catalog `visibility: "hide"` entry, kept public here because the
   // ChatGPT backend serves it (confirmed live, #4202). Values mirror the official
   // entry: default `low`, levels through `ultra`, 872k max context, no Fast tier.
