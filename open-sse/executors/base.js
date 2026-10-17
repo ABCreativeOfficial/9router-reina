@@ -127,9 +127,23 @@ export class BaseExecutor {
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
       const url = this.buildUrl(model, stream, urlIndex, credentials);
       const transformedBody = this.transformRequest(model, body, stream, credentials);
-      const headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
+      let headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
       // User per-provider override wins over registry headers (blocked names filtered at the API)
       if (providerOverrides?.headers) Object.assign(headers, providerOverrides.headers);
+      // Optional post-override hook. buildHeaders runs before the merge, so an
+      // executor that owns a required header family must re-assert it here —
+      // otherwise an override written in a different case leaves two keys and
+      // the fetch layer joins them into one comma-separated value.
+      if (typeof this.finalizeHeaders === "function") {
+        headers = this.finalizeHeaders(headers, {
+          credentials,
+          body: transformedBody,
+          model,
+          url,
+          stream,
+          providerOverrides,
+        }) || headers;
+      }
 
       if (!retryAttemptsByUrl[urlIndex]) retryAttemptsByUrl[urlIndex] = 0;
 
