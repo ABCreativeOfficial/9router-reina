@@ -19,6 +19,12 @@ export default {
     },
     forceStream: true,
     noAuth: true,
+    // Free-lane 429 is usually the gateway route, not the account — probe in
+    // utils/opencodeLane.js. Bounded retries turn that flake into a success;
+    // a quota 429 is vetoed by the executor hook instead.
+    retry: {
+      429: { attempts: 2, delayMs: 500 },
+    },
     // Zen reasoning models reject multi-turn history whose assistant messages
     // carry no reasoning_content (400 missing_required_parameter), and the
     // response pipeline strips the field before it reaches the client, so the
