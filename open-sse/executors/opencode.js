@@ -3,10 +3,12 @@ import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
 import { getThinkingLevels } from "../providers/thinkingLevels.js";
+import { resolveReasoningLevel } from "../translator/concerns/thinking.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { isMuseSparkModel } from "../providers/models/helpers.js";
 import { applyFingerprintTools } from "../utils/opencodeFingerprint.js";
+import { computeOpencodeRetryDelay, parseOpencodeError } from "../utils/opencodeLane.js";
 import { ANTHROPIC_API_VERSION } from "../providers/shared.js";
 import {
   normalizeResponsesInput,
@@ -307,12 +309,12 @@ function normalizeOpencodeReasoning(model, body) {
   if (typeof requestedEffort !== "string") return;
 
   const cleanModel = baseModelId(model || body.model);
+  // Fit the effort to the model's declared set (see resolveReasoningLevel) rather
+  // than rewriting max|ultra→xhigh for every model: the free lane accepts whichever
+  // levels a model declares, and one that declares a different ceiling is fitted
+  // to it instead of to a hardcoded value.
   const supportedLevels = getThinkingLevels("opencode", cleanModel);
-  let effort = requestedEffort.toLowerCase().trim();
-  if ((effort === "max" || effort === "ultra") && supportedLevels?.length && !supportedLevels.includes(effort)) {
-    if (effort === "ultra" && supportedLevels.includes("max")) effort = "max";
-    else if (supportedLevels.includes("xhigh")) effort = "xhigh";
-  }
+  const effort = resolveReasoningLevel(requestedEffort, supportedLevels) ?? requestedEffort;
 
   body.reasoning = { ...currentReasoning, effort };
   if (!body.reasoning.summary) body.reasoning.summary = "auto";
@@ -386,6 +388,17 @@ export class OpenCodeExecutor extends BaseExecutor {
 
   async execute(args) {
     return super.execute({ ...args, credentials: this.prepareRequestCredentials(args) });
+  }
+
+  // Bounded retry for the transient free-lane 429, vetoed for quota 429s.
+  computeRetryDelay(response, attempt) {
+    return computeOpencodeRetryDelay(response, attempt);
+  }
+
+  // Report the gateway-route 429 as 503 (upstream unavailable), not as this
+  // caller's rate limit. Quota 429s keep their status.
+  parseError(response, bodyText) {
+    return parseOpencodeError(response, bodyText);
   }
 
   // Free tier moved from /zen/v1 to /inference/v1 (OpenCode v2); /zen/v1 now
