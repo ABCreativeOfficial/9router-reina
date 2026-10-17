@@ -239,6 +239,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           isLLMProvider(connection.provider)
           && !AI_PROVIDERS[connection.provider]?.hidden
         ));
+        // A leftover connection row must never invent a provider node: the
+        // helper itself resolves against the static registry.
         const providerEntities = buildProviderTopologyProviders(
           llmConnections,
           nodesData?.nodes || [],
