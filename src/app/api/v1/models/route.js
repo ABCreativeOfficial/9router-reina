@@ -235,16 +235,16 @@ async function fetchCompatibleModelIds(connection) {
     return [];
   }
 
+  let timeoutId;
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    timeoutId = setTimeout(() => controller.abort(), 5000);
     const response = await fetch(url, {
       method: "GET",
       headers: { ...headers, [INTERNAL_MODELS_FETCH_HEADER]: "1" },
       cache: "no-store",
       signal: controller.signal,
     });
-    clearTimeout(timeoutId);
 
     if (!response.ok) return [];
 
@@ -260,6 +260,9 @@ async function fetchCompatibleModelIds(connection) {
     );
   } catch {
     return [];
+  } finally {
+    // The deadline covers response-body parsing as well as the headers.
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 }
 
