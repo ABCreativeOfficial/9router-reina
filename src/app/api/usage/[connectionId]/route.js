@@ -3,7 +3,7 @@ import "open-sse/index.js";
 
 import { getProviderConnectionById, updateProviderConnection } from "@/lib/localDb";
 import { getUsageForProvider } from "open-sse/services/usage.js";
-import { isUnrecoverableRefreshError } from "open-sse/services/tokenRefresh.js";
+import { isUnrecoverableRefreshError, isRefreshUnavailable } from "open-sse/services/tokenRefresh.js";
 import { getExecutor } from "open-sse/executors/index.js";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { USAGE_APIKEY_PROVIDERS } from "@/shared/constants/providers";
@@ -57,6 +57,12 @@ export async function refreshAndUpdateCredentials(connection, force = false, pro
   // Refresh token reused/invalidated — token family is revoked; do not continue with the dead token.
   if (refreshResult && isUnrecoverableRefreshError(refreshResult)) {
     throw new Error("Refresh token invalid or reused. Please re-authorize the connection.");
+  }
+
+  // The provider has no refresh at all (API-key auth / long-lived token). Keep the
+  // existing token rather than treating the sentinel as a failed refresh body.
+  if (isRefreshUnavailable(refreshResult)) {
+    return { connection, refreshed: false };
   }
 
   if (!refreshResult) {
