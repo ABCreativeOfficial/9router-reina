@@ -88,6 +88,11 @@
 
 # v0.5.104 (2026-10-15)
 
+## Fixes (fork: CodeBuddy IDE artifact-backed stream headers)
+- **CodeBuddy Intl**: align generated `X-Request-ID` with `X-Conversation-Request-ID`, not the independent message ID, following `buildModelRequestHeaders` in the supplied IDE 4.12.1 extension. Existing explicit header overrides remain authoritative and case-insensitive.
+- **CodeBuddy Intl**: supply `X-Model-ID` when absent and request `Accept: text/event-stream` even for downstream JSON clients, matching the existing forced-stream request body. No endpoint, identity/version, system prompt, CN executor, or account-restriction policy changes.
+- **Evidence**: selected client files were statically extracted from the supplied Inno 6.7 installer and SHA-256 checked against its file-location table. REA MCP parsed exact factory excerpts. Static evidence does not prove current gateway requirements or a successful live call. No installer/application execution, credential capture, device-token fabrication, or account-restriction bypass.
+
 ## Fixes (fork: CodeBuddy Intl / CBAI Global — restrictions, cooldowns, refresh)
 - **CodeBuddy Intl 11140**: `403 "Your account has been restricted due to unusual activity"` is now classified on its own, before every other branch and independent of the HTTP status. The marker survives into the caller's error so the real upstream wording is not overwritten, and `ERROR_RULES` maps it to a long (6h, bounded) **account-wide** lock. Nothing client-side clears a restriction; the message says so and points at upstream recovery instead of inviting more retries.
 - **CodeBuddy Intl 11128 channel gate**: the live gateway answers `{"code":11128,"msg":"request illegal"}` with the explanation in `displayTips`. The classifier now matches `request illegal` under 11128 (or alongside explicit channel wording), so the diagnosis is "channel verification" instead of a generic illegal request, and it emits a marker `ERROR_RULES` matches. This closes #5024: an unmatched 400 used to return `cooldownMs: 0`, so a provider/IP block never expired while every request re-fired into it.
