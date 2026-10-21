@@ -460,7 +460,26 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   }
 
   // Handle 401/403 - try token refresh (skip for noAuth providers)
-  if (!executor.noAuth && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)) {
+  let accountRestricted = false;
+  if (
+    !executor.noAuth
+    && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)
+  ) {
+    // An account restriction (e.g. CodeBuddy 11140) answers 403 but is not a token
+    // problem: refreshing and replaying the request cannot clear it and only costs
+    // another round trip against a frozen account. Executors that can tell the
+    // difference opt in; everything else keeps the existing behaviour.
+    if (providerResponse.status === HTTP_STATUS.FORBIDDEN && typeof executor.isAccountRestricted === "function") {
+      try { accountRestricted = await executor.isAccountRestricted(providerResponse.clone()); } catch { /* treat as refreshable */ }
+    }
+  }
+
+  if (accountRestricted) {
+    log?.warn?.("TOKEN", `${provider.toUpperCase()} | account restricted upstream, skipping refresh`);
+  } else if (
+    !executor.noAuth
+    && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)
+  ) {
     try {
       // Mutate credentials after each successful refresh: rotating refresh_token
       // providers (xAI/grok-cli) issue a new RT on every refresh; without this,

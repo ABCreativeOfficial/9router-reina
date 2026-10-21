@@ -41,6 +41,20 @@ export const TRANSIENT_COOLDOWN_MS = 30 * 1000;
 // Hard cap for provider-reported rate limit cooldown (e.g. codex resets_at can be 5-6h)
 export const MAX_RATE_LIMIT_COOLDOWN_MS = 30 * 60 * 1000;
 
+// Account-level restriction (CodeBuddy 11140 / "unusual activity"): upstream has
+// frozen the *account*, not the request. Reported blocks lasted 11h+ and users
+// describe them as bans (#5041, #5001); the fix is an official recovery, not a
+// retry. Finite on purpose — the lock is visible in the dashboard and clearable,
+// and an infinite one would survive a genuine upstream unban.
+export const ACCOUNT_RESTRICTED_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+
+// Message markers CodeBuddyIntlExecutor.parseError() writes into its diagnostic
+// text. ERROR_RULES matches on message text, so both sides share this vocabulary
+// instead of each duplicating the other's prose: the executor imports the marker,
+// the rule below matches it, and a reworded message cannot silently stop matching.
+export const CODEBUDDY_CHANNEL_MARKER = "codebuddy channel verification";
+export const CODEBUDDY_ACCOUNT_RESTRICTED_MARKER = "codebuddy account restricted";
+
 // Cooldown durations (ms)
 const COOLDOWN = {
   long: 2 * 60 * 1000,
@@ -57,6 +71,27 @@ const COOLDOWN = {
  *   - backoff: true = use exponential backoff (rate limit)
  */
 export const ERROR_RULES = [
+  // --- CodeBuddy Intl. Both markers are emitted only by that executor's
+  // parseError(), so matching on them cannot catch another provider's error.
+  // No `provider` field on purpose: the account-selection path calls
+  // checkFallbackError with the resolved provider id, while the combo path calls
+  // it without one — a provider-scoped rule would silently stop applying there.
+  //
+  // 11140: the account is frozen, and no retry, account fallback or header change
+  // clears it (#5041 measured both accounts gated identically). Lock the account
+  // out of rotation for a long, finite window instead of re-firing refused
+  // requests at it. `accountScoped` makes the lock cover every model, because
+  // every model on a frozen account is refused identically.
+  { text: CODEBUDDY_ACCOUNT_RESTRICTED_MARKER, cooldownMs: ACCOUNT_RESTRICTED_COOLDOWN_MS, accountScoped: true },
+  // 11128 channel verification: provider-scoped, NOT request-scoped. #5024 shows
+  // the identical payload succeeding minutes later while every session stays
+  // blocked — the account is not healthy, so keeping it in rotation is what keeps
+  // it broken. Without this rule the 400 lands in the unmatched-4xx catch-all at
+  // cooldownMs 0, so the block never gets a chance to expire. The overloaded
+  // sibling "first message is not system prompt" is genuinely request-scoped and
+  // carries no marker, so it keeps cooldownMs 0.
+  { text: CODEBUDDY_CHANNEL_MARKER, backoff: true, accountScoped: true },
+
   // --- Text-based rules (checked first, order = priority) ---
   { provider: "codex", text: "model is not supported when using codex with a chatgpt account", cooldownMs: MAX_RATE_LIMIT_COOLDOWN_MS },
   { text: "no credentials",           cooldownMs: COOLDOWN.long },

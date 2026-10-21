@@ -18,7 +18,11 @@ export function getQuotaCooldown(backoffLevel = 0) {
  * @param {number} status - HTTP status code
  * @param {string} errorText - Error message text
  * @param {number} backoffLevel - Current backoff level for exponential backoff
- * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number }}
+ * @param {string|null} provider - Resolved provider id, for provider-scoped rules
+ * @returns {{ shouldFallback: boolean, cooldownMs: number, newBackoffLevel?: number, accountScoped?: boolean }}
+ *   `accountScoped` is present (true) only for rules that describe a failure of the
+ *   whole credential rather than of one model; callers use it to lock the entire
+ *   connection instead of the model that happened to surface the error.
  */
 export function checkFallbackError(status, errorText, backoffLevel = 0, provider = null) {
   const lowerError = errorText
@@ -31,18 +35,36 @@ export function checkFallbackError(status, errorText, backoffLevel = 0, provider
     if (rule.text && lowerError && lowerError.includes(rule.text)) {
       if (rule.backoff) {
         const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
-        return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
+        return {
+          shouldFallback: true,
+          cooldownMs: getQuotaCooldown(newLevel),
+          newBackoffLevel: newLevel,
+          ...(rule.accountScoped ? { accountScoped: true } : {}),
+        };
       }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
+      return {
+        shouldFallback: true,
+        cooldownMs: rule.cooldownMs,
+        ...(rule.accountScoped ? { accountScoped: true } : {}),
+      };
     }
 
     // Status-based rule: match HTTP status code
     if (rule.status && rule.status === status) {
       if (rule.backoff) {
         const newLevel = Math.min(backoffLevel + 1, BACKOFF_CONFIG.maxLevel);
-        return { shouldFallback: true, cooldownMs: getQuotaCooldown(newLevel), newBackoffLevel: newLevel };
+        return {
+          shouldFallback: true,
+          cooldownMs: getQuotaCooldown(newLevel),
+          newBackoffLevel: newLevel,
+          ...(rule.accountScoped ? { accountScoped: true } : {}),
+        };
       }
-      return { shouldFallback: true, cooldownMs: rule.cooldownMs };
+      return {
+        shouldFallback: true,
+        cooldownMs: rule.cooldownMs,
+        ...(rule.accountScoped ? { accountScoped: true } : {}),
+      };
     }
   }
 
