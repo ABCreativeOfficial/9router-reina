@@ -62,7 +62,8 @@ describe("conversation header family", () => {
   it("keeps the captured id relationships", () => {
     const headers = buildHeaders(body);
     expect(headers["X-Root-Request-ID"]).toBe(headers["X-Conversation-Request-ID"]);
-    expect(headers["X-Request-ID"]).toBe(headers["X-Conversation-Message-ID"]);
+    expect(headers["X-Request-ID"]).toBe(headers["X-Conversation-Request-ID"]);
+    expect(headers["X-Conversation-Message-ID"]).not.toBe(headers["X-Request-ID"]);
   });
 
   it("sends the W3C / B3 trace family derived from one trace id", () => {
@@ -173,7 +174,7 @@ describe("caller-supplied ids are preserved", () => {
     }, body);
     expect(headers["X-Conversation-ID"]).toBe("11111111-1111-1111-1111-111111111111");
     expect(headers["X-Conversation-Message-ID"]).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    expect(headers["X-Request-ID"]).toBe("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    expect(headers["X-Request-ID"]).toBe(headers["X-Conversation-Request-ID"]);
     expect(headers["X-Conversation-Request-ID"]).toMatch(HEX32);
   });
 
@@ -208,13 +209,14 @@ describe("header lookup and writes are case-insensitive", () => {
   it("does not duplicate a caller's mixed-case message id", () => {
     const headers = ensureConversationHeaders({ "X-Conversation-Message-Id": "caller-mixed" }, body);
     expect(keysMatching(headers, "x-conversation-message-id")).toHaveLength(1);
-    expect(headers["X-Request-ID"]).toBe("caller-mixed");
+    expect(headers["X-Request-ID"]).toBe(headers["X-Conversation-Request-ID"]);
   });
 
   it("recognises a lowercase X-Request-ID when mirroring", () => {
     const headers = ensureConversationHeaders({ "x-request-id": "caller-trace" }, body);
     expect(headers["x-request-id"]).toBe("caller-trace");
-    expect(headers["X-Conversation-Message-ID"]).toBe("caller-trace");
+    expect(headers["X-Conversation-Request-ID"]).toBe("caller-trace");
+    expect(headers["X-Conversation-Message-ID"]).not.toBe("caller-trace");
   });
 
   it("fills a fetch Headers instance instead of adding plain properties", () => {
@@ -271,12 +273,45 @@ describe("providerOverrides cannot corrupt the family", () => {
     });
 
     expect(captured.headers["X-Conversation-Message-ID"]).toMatch(HEX32);
-    expect(captured.headers["X-Request-ID"]).toBe(captured.headers["X-Conversation-Message-ID"]);
+    expect(captured.headers["X-Request-ID"]).toBe(captured.headers["X-Conversation-Request-ID"]);
     spy.mockRestore();
   });
 });
 
 describe("execute() integration", () => {
+  it("uses SSE upstream even for a JSON client and includes the model correlation header", async () => {
+    let captured;
+    vi.spyOn(proxyFetchModule, "proxyAwareFetch").mockImplementation(async (_url, init) => {
+      captured = init;
+      return new Response('data: [DONE]\n\n', { headers: { "Content-Type": "text/event-stream" } });
+    });
+    await new CodeBuddyIntlExecutor().execute({
+      model: "glm-5.2", body: { messages: [{ role: "user", content: "hello" }], stream: false },
+      stream: false, credentials: CREDS,
+    });
+    expect(captured.headers.Accept).toBe("text/event-stream");
+    expect(captured.headers["X-Model-ID"]).toBe("glm-5.2");
+    expect(JSON.parse(captured.body).stream).toBe(true);
+    expect(captured.headers["X-Request-ID"]).toBe(captured.headers["X-Conversation-Request-ID"]);
+  });
+
+  it("preserves case-insensitive model/request overrides without duplicate keys", async () => {
+    let captured;
+    vi.spyOn(proxyFetchModule, "proxyAwareFetch").mockImplementation(async (_url, init) => {
+      captured = init;
+      return new Response('data: [DONE]\n\n', { headers: { "Content-Type": "text/event-stream" } });
+    });
+    await new CodeBuddyIntlExecutor().execute({
+      model: "glm-5.2", body: { messages: [{ role: "user", content: "hello" }] },
+      stream: true, credentials: CREDS,
+      providerOverrides: { headers: { "x-model-id": "explicit-model", "x-request-id": "explicit-request" } },
+    });
+    expect(keysMatching(captured.headers, "x-model-id")).toHaveLength(1);
+    expect(captured.headers["x-model-id"]).toBe("explicit-model");
+    expect(keysMatching(captured.headers, "x-request-id")).toHaveLength(1);
+    expect(captured.headers["x-request-id"]).toBe("explicit-request");
+  });
+
   it("sends the family and the normalised body upstream", async () => {
     const captured = {};
     const spy = vi.spyOn(proxyFetchModule, "proxyAwareFetch")
