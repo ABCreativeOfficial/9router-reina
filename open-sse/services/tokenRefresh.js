@@ -1,5 +1,5 @@
 import { PROVIDERS } from "../config/providers.js";
-import { OAUTH_ENDPOINTS, REFRESH_LEAD_MS } from "../config/appConstants.js";
+import { OAUTH_ENDPOINTS, REFRESH_LEAD_MS, REFRESH_UNAVAILABLE, isRefreshUnavailable } from "../config/appConstants.js";
 import {
   refreshXaiToken,
   refreshAccessToken,
@@ -56,6 +56,8 @@ export function isUnrecoverableRefreshError(result) {
       result.error === "invalid_grant")
   );
 }
+
+export { REFRESH_UNAVAILABLE, isRefreshUnavailable } from "../config/appConstants.js";
 
 export function getRefreshLeadMs(provider) {
   if (REFRESH_LEAD_MS[provider]) return REFRESH_LEAD_MS[provider];
@@ -273,7 +275,16 @@ export async function refreshWithRetry(refreshFn, maxRetries = 3, log = null) {
 
     try {
       const result = await refreshFn();
-      if (result) return result;
+      if (result) {
+        // "This provider has no refresh" is a final answer, not a transient miss.
+        // Retrying it cannot change it, and the "all attempts failed" line it would
+        // leave behind misreports a missing capability as a broken credential.
+        if (isRefreshUnavailable(result)) {
+          log?.debug?.("TOKEN_REFRESH", "Provider has no token refresh; not retrying");
+          return null;
+        }
+        return result;
+      }
     } catch (error) {
       log?.warn?.("TOKEN_REFRESH", `Attempt ${attempt + 1}/${maxRetries} failed: ${error.message}`);
     }
