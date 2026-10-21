@@ -8,7 +8,8 @@ import { createHash, randomBytes } from "node:crypto";
  * Shape is capture-verified against the official desktop client:
  *   X-Conversation-ID          dashed UUIDv7
  *   X-Conversation-Request-ID  32 hex (mirrored by X-Root-Request-ID)
- *   X-Conversation-Message-ID  32 hex (mirrored by X-Request-ID)
+ *   X-Conversation-Message-ID  32 hex (separate from the request id)
+ *   X-Request-ID               mirrors X-Conversation-Request-ID (IDE 4.12.1)
  *   X-Trace-ID / traceparent / b3 / X-B3-* — one trace per request
  *
  * Upstream keeps no history under the conversation id, so the id only has to be
@@ -258,7 +259,7 @@ if (cleanup.unref) cleanup.unref();
  */
 export function ensureConversationHeaders(headers, body = null, options = {}) {
   const bag = dedupeHeaders(headers) || {};
-  const { credentials = null, scope = "codebuddy-intl" } = options;
+  const { credentials = null, scope = "codebuddy-intl", model = null } = options;
   const key = conversationKey({ credentials, body, scope });
 
   const conversationId = toDashedUuid(readHeader(bag, "X-Conversation-ID"))
@@ -266,19 +267,24 @@ export function ensureConversationHeaders(headers, body = null, options = {}) {
     || uuid7();
   writeHeader(bag, "X-Conversation-ID", conversationId);
 
-  const requestId = toHex32(readHeader(bag, "X-Conversation-Request-ID")) || uuid7Hex();
+  // IDE 4.12.1 buildModelRequestHeaders uses the request id for both fields,
+  // independently of the message id. Preserve explicit caller/override values.
+  const requestId = toHex32(readHeader(bag, "X-Conversation-Request-ID"))
+    || toHex32(readHeader(bag, "X-Request-ID"))
+    || uuid7Hex();
   writeHeader(bag, "X-Conversation-Request-ID", requestId);
   if (!readHeader(bag, "X-Root-Request-ID")) {
     writeHeader(bag, "X-Root-Request-ID", requestId);
   }
 
-  const messageId = toHex32(readHeader(bag, "X-Conversation-Message-ID"))
-    || toHex32(readHeader(bag, "X-Request-ID"))
-    || uuid7Hex();
+  const messageId = toHex32(readHeader(bag, "X-Conversation-Message-ID")) || uuid7Hex();
   writeHeader(bag, "X-Conversation-Message-ID", messageId);
   if (!readHeader(bag, "X-Request-ID")) {
-    writeHeader(bag, "X-Request-ID", messageId);
+    writeHeader(bag, "X-Request-ID", requestId);
   }
+  // TencentAPIImpl supplies the model header for chat and streaming chat.
+  const modelId = typeof model === "string" ? model.trim() : "";
+  if (modelId && !readHeader(bag, "X-Model-ID")) writeHeader(bag, "X-Model-ID", modelId);
 
   const traceId = readHeader(bag, "X-Trace-ID")
     || readHeader(bag, "X-B3-TraceId")

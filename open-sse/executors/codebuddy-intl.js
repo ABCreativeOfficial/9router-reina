@@ -161,12 +161,13 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
   // providerOverrides are merged, because that merge can introduce a duplicate
   // case-variant key or blank a required one.
   buildHeaders(credentials, stream = true, url, model, body = null) {
-    const headers = super.buildHeaders(credentials, stream, url, model, body);
-    return ensureConversationHeaders(headers, body, { credentials, scope: "codebuddy-intl" });
+    // The gateway always streams, including when the downstream client wants JSON.
+    const headers = super.buildHeaders(credentials, true, url, model, body);
+    return ensureConversationHeaders(headers, body, { credentials, model, scope: "codebuddy-intl" });
   }
 
-  finalizeHeaders(headers, { credentials, body } = {}) {
-    return ensureConversationHeaders(headers, body, { credentials, scope: "codebuddy-intl" });
+  finalizeHeaders(headers, { credentials, body, model } = {}) {
+    return ensureConversationHeaders(headers, body, { credentials, model, scope: "codebuddy-intl" });
   }
 
   transformRequest(model, body, stream, credentials) {
