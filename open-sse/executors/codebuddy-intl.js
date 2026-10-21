@@ -3,6 +3,14 @@ import {
   ensureConversationHeaders,
   flattenContent,
 } from "../utils/conversationHeaders.js";
+import {
+  CODEBUDDY_CHANNEL_MARKER,
+  CODEBUDDY_ACCOUNT_RESTRICTED_MARKER,
+} from "../config/errorConfig.js";
+import {
+  refreshCodebuddyIntlToken,
+  REFRESH_UNAVAILABLE,
+} from "../services/tokenRefresh.js";
 
 /**
  * CodeBuddyIntlExecutor — talks to https://www.codebuddy.ai/v2/chat/completions
@@ -29,18 +37,27 @@ import {
 // channel-verification variant and a body-shape variant, so the message decides.
 const CODE_CHANNEL_VERIFICATION = 11128;
 const CODE_FREQUENCY_LIMIT = 6004;
+const CODE_TOO_MANY_REQUESTS = 14003;
 const CODE_NON_STREAM = 11101;
 const CODE_MODEL_NOT_FOUND = 11102;
 const CODE_INVALID_REQUEST = 11103;
+// 11140: the account itself is frozen, independent of the request body. Measured
+// live as `403 {"code":11140,"msg":"Your account has been restricted due to
+// unusual activity"}` once the channel gate has been satisfied (#5005 comment,
+// 2026-10-18). Nothing client-side clears it; see the branch below.
+const CODE_ACCOUNT_RESTRICTED = 11140;
 
 // The gate's wording has changed over time. Observed live:
 //   "conversation id missing"                       (PR #4928/#4944, 2026-10-15)
 //   "Illegal API invocation from an unapproved channel"  (live, 2026-10-17)
-// Both are channel verification; match either so the diagnosis does not rot.
+//   "request illegal"                               (live, #5001/#5024, 2026-10-18)
+// All three are the same gate; match any so the diagnosis does not rot.
 const RE_CHANNEL_VERIFICATION = /conversation id missing|channel verification|unapproved channel|渠道校验/i;
 const RE_SYSTEM_PROMPT = /first message is not system prompt/i;
 const RE_REQUEST_ILLEGAL = /request illegal|illegal request/i;
 const RE_FREQUENCY_LIMIT = /超出频率限制|frequency limit|限额/i;
+const RE_TOO_MANY_REQUESTS = /too many requests|model busy/i;
+const RE_ACCOUNT_RESTRICTED = /unusual activity|account (?:has been |is )?restricted|account restricted|账号.{0,6}(?:受限|异常|封禁)/i;
 
 function parseResetAt(msg) {
   const match = msg.match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})(?:\s*UTC\+?([0-9:]+))?/i);
@@ -176,6 +193,27 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
         const data = JSON.parse(bodyText);
         const msg = data?.msg || data?.message || data?.error?.message || "";
         const code = Number(data?.code);
+        // The gate's wording may live in msg or in one of the display fields —
+        // `{"msg":"request illegal","displayTips":{"en":"This call failed channel
+        // verification…"}}` is the live shape. Classify on the whole record.
+        const haystack = [msg, data?.displayTips?.en, data?.displayMsg?.en].filter(Boolean).join(" ");
+
+        // Account restriction is checked before anything else and does not depend
+        // on the HTTP status (measured as 403, but the body is the authority).
+        // Upstream has frozen the account: no header, body or retry changes that,
+        // and the real message must reach the caller rather than being flattened
+        // into a generic "illegal request". ERROR_RULES maps the marker to a long
+        // account-wide lock; the caller is expected to re-authorise upstream.
+        if (code === CODE_ACCOUNT_RESTRICTED || RE_ACCOUNT_RESTRICTED.test(haystack)) {
+          return {
+            status: 403,
+            message:
+              `${CODEBUDDY_ACCOUNT_RESTRICTED_MARKER} (11140): upstream refused this account, not this request`
+              + (msg ? ` — upstream said: ${msg}.` : ".")
+              + " No retry, account fallback or header change clears a restriction;"
+              + " the account needs recovery on codebuddy.ai (re-login or appeal) before it can be used again.",
+          };
+        }
 
         if (code === CODE_FREQUENCY_LIMIT || RE_FREQUENCY_LIMIT.test(msg)) {
           return {
@@ -185,18 +223,45 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
           };
         }
 
-        // 11128 is overloaded — only the conversation-id wording is the channel
-        // gate. Claiming it for the system-prompt variant would send the operator
-        // after the wrong fix.
-        if (code === CODE_CHANNEL_VERIFICATION && RE_CHANNEL_VERIFICATION.test(msg)) {
+        // 14003 "Model busy" is a per-model rate limit, not a channel failure
+        // (#5041). Keep it a 429 so the existing backoff rules apply.
+        if (code === CODE_TOO_MANY_REQUESTS || RE_TOO_MANY_REQUESTS.test(msg)) {
+          return {
+            status: 429,
+            message: msg || "CodeBuddy upstream busy (14003)",
+            resetsAtMs: parseResetAt(msg),
+          };
+        }
+
+        // 11128 is overloaded — the message decides which variant this is.
+        //
+        // Channel verification: the gateway refuses the call because it does not
+        // trust the client. The live wordings are "conversation id missing",
+        // "Illegal API invocation from an unapproved channel", and — since the
+        // 2026-10-15 gate — a bare "request illegal" whose explanation lives in
+        // displayTips (#5001, #5024, #5041). The marker below is what ERROR_RULES
+        // matches to give the connection a cooldown; without it the 400 falls into
+        // the request-scoped catch-all (cooldownMs 0) and the block never expires.
+        //
+        // "request illegal" is read as the gate only when the record identifies
+        // itself as a gate: under code 11128 (the measured shape) or alongside the
+        // explicit channel wording. A plain 11103 "request illegal" stays
+        // request-scoped below — cooling the account for a malformed body is the
+        // behaviour the catch-all exists to prevent.
+        const channelGate =
+          (code === CODE_CHANNEL_VERIFICATION &&
+            (RE_REQUEST_ILLEGAL.test(msg) || RE_CHANNEL_VERIFICATION.test(haystack))) ||
+          (RE_REQUEST_ILLEGAL.test(msg) && RE_CHANNEL_VERIFICATION.test(haystack));
+        if (channelGate && !RE_SYSTEM_PROMPT.test(msg)) {
           const tip = data?.displayTips?.en || data?.displayMsg?.en || "";
           return {
             status: 400,
             message:
-              "CodeBuddy channel verification failed (11128): "
+              `${CODEBUDDY_CHANNEL_MARKER} failed (${code || 11128}): `
               + "the upstream gateway requires the X-Conversation-* header family and client identity "
               + "the official client sends. CodeBuddyIntlExecutor supplies them; if this appears, the "
-              + "gate likely changed (e.g. a new required header) or the prompt tripped its filter."
+              + "gate likely changed (e.g. a new required header), the prompt tripped its filter, or the "
+              + "account/IP is temporarily blocked upstream."
               + (msg ? ` Upstream said: ${msg}.` : "")
               + (tip ? ` ${tip}` : ""),
           };
@@ -241,6 +306,49 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
       }
     }
     return super.parseError(response, bodyText);
+  }
+
+  /**
+   * Read-only probe used by chatCore before it treats a 401/403 as a token
+   * problem. The response is a clone, so the real body stays available for
+   * parseUpstreamError(). Classification is delegated to parseError() so the two
+   * paths cannot drift.
+   */
+  async isAccountRestricted(response) {
+    try {
+      const text = await response.text();
+      const parsed = this.parseError(response, text);
+      return parsed?.status === 403
+        && typeof parsed.message === "string"
+        && parsed.message.includes(CODEBUDDY_ACCOUNT_RESTRICTED_MARKER);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The shared refresher exists (reactive 401/403 path in chatCore used to fall
+   * through DefaultExecutor, which has no entry for this provider and returned
+   * null → refreshWithRetry burned 3 attempts and logged "All 3 retry attempts
+   * failed" even though the token endpoint was never called).
+   *
+   * Delegating keeps one implementation: the same function the proactive and
+   * background refresh paths use. A connection without a refresh token returns
+   * the sentinel so the retry loop stops immediately instead of sleeping twice
+   * for a capability this connection does not have.
+   */
+  async refreshCredentials(credentials, log) {
+    if (!credentials?.refreshToken) return REFRESH_UNAVAILABLE;
+    try {
+      const result = await refreshCodebuddyIntlToken(credentials.refreshToken, log);
+      if (result?.accessToken) {
+        log?.info?.("TOKEN", "codebuddy-intl refreshed");
+      }
+      return result;
+    } catch (error) {
+      log?.warn?.("TOKEN", `codebuddy-intl refresh error: ${error.message}`);
+      return null;
+    }
   }
 }
 

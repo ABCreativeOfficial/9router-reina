@@ -1,4 +1,5 @@
 import { DefaultExecutor } from "./default.js";
+import { refreshCodebuddyToken, REFRESH_UNAVAILABLE } from "../services/tokenRefresh.js";
 
 /**
  * CodeBuddyExecutor — talks to https://copilot.tencent.com/v2/chat/completions
@@ -12,6 +13,27 @@ import { DefaultExecutor } from "./default.js";
 export class CodeBuddyExecutor extends DefaultExecutor {
   constructor() {
     super("codebuddy-cn");
+  }
+
+  /**
+   * Same gap as codebuddy-intl: DefaultExecutor has no refresher for this
+   * provider, so a 401/403 made refreshWithRetry() spend three attempts on a
+   * refresh that was never attempted and log it as a failed credential. Delegate
+   * to the real refresher; report "no refresh available" when the connection has
+   * no refresh token so the retry loop stops immediately.
+   */
+  async refreshCredentials(credentials, log) {
+    if (!credentials?.refreshToken) return REFRESH_UNAVAILABLE;
+    try {
+      const result = await refreshCodebuddyToken(credentials.refreshToken, log);
+      if (result?.accessToken) {
+        log?.info?.("TOKEN", "codebuddy-cn refreshed");
+      }
+      return result;
+    } catch (error) {
+      log?.warn?.("TOKEN", `codebuddy-cn refresh error: ${error.message}`);
+      return null;
+    }
   }
 
   transformRequest(model, body, stream, credentials) {
