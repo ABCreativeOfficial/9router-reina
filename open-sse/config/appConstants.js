@@ -201,6 +201,24 @@ export const REFRESH_LEAD_MS = Object.fromEntries(
   Object.entries(PROVIDER_OAUTH).filter(([, o]) => o.refreshLeadMs).map(([id, o]) => [id, o.refreshLeadMs])
 );
 
+/**
+ * Returned by an executor's refreshCredentials() when the provider has no token
+ * refresh at all (API-key auth, or a long-lived token). Distinct from `null`,
+ * which means "a refresh was attempted and failed".
+ *
+ * Why it exists: chatCore/embeddings/image treat *any* 401/403 as "try a refresh
+ * first", and refreshWithRetry() retries a falsy result 3 times with backoff.
+ * For a provider that cannot refresh, that is 3 pointless attempts (~3s) before
+ * the request is handed back — and the log line it leaves behind, "[TOKEN_REFRESH]
+ * All 3 retry attempts failed", reads like the *token* is broken when the truth
+ * is that no refresh exists. Callers check this sentinel and skip the retry loop.
+ */
+export const REFRESH_UNAVAILABLE = Object.freeze({ error: "refresh_unavailable" });
+
+export function isRefreshUnavailable(result) {
+  return result === REFRESH_UNAVAILABLE || result?.error === "refresh_unavailable";
+}
+
 // OAuth endpoints
 export const OAUTH_ENDPOINTS = {
   google:    { token: "https://oauth2.googleapis.com/token", auth: "https://accounts.google.com/o/oauth2/auth" },
