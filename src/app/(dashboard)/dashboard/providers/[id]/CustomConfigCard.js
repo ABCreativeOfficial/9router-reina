@@ -16,6 +16,16 @@ export default function CustomConfigCard({ providerId }) {
   const [builtin, setBuiltin] = useState({});
   const [hasOverride, setHasOverride] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [context, setContext] = useState({
+    enabled: false,
+    contextLimit: null,
+    triggerThreshold: 0.95,
+    safetyMargin: 0.05,
+    outputReserveTokens: 4096,
+    fallbackCompression: false,
+    preferNativeCompaction: true,
+    keepRecentTurns: 2,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -28,8 +38,9 @@ export default function CustomConfigCard({ providerId }) {
         const effective = { ...builtinHeaders, ...(data.headers || {}) };
         const headerRows = Object.entries(effective).map(([name, value]) => ({ name, value }));
         setBuiltin(builtinHeaders);
+        setContext(data.context || { enabled: false, contextLimit: null, triggerThreshold: 0.95, safetyMargin: 0.05, outputReserveTokens: 4096, fallbackCompression: false, preferNativeCompaction: true, keepRecentTurns: 2 });
         setRows(headerRows.length ? headerRows : [{ name: "", value: "" }]);
-        setHasOverride(Object.keys(data.headers || {}).length > 0);
+        setHasOverride(Object.keys(data.headers || {}).length > 0 || !!data.context?.enabled || !!data.context?.fallbackCompression);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -65,19 +76,19 @@ export default function CustomConfigCard({ providerId }) {
       const res = await fetch(`/api/providers/${providerId}/overrides`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ headers }),
+        body: JSON.stringify({ headers, ...(providerId === "codebuddy-intl" ? { context } : {}) }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         notify.error(err.error || "Failed to save");
         return;
       }
-      setHasOverride(Object.keys(headers).length > 0);
+      setHasOverride(Object.keys(headers).length > 0 || (providerId === "codebuddy-intl" && (!!context.enabled || !!context.fallbackCompression)));
       notify.success("Custom headers saved");
     } finally {
       setSaving(false);
     }
-  }, [rows, builtin, providerId, notify]);
+  }, [rows, builtin, providerId, context, notify]);
 
   const resetToBuiltin = () => {
     setRows(Object.entries(builtin).map(([name, value]) => ({ name, value })));
@@ -107,6 +118,41 @@ export default function CustomConfigCard({ providerId }) {
 
       {expanded && (
         <div className="mt-3 border-t border-border pt-3">
+          {providerId === "codebuddy-intl" && (
+            <fieldset className="mb-4 rounded-md border border-border p-3">
+              <legend className="px-1 text-xs font-semibold">Context handling</legend>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={context.enabled} onChange={(e) => setContext((p) => ({ ...p, enabled: e.target.checked }))} />
+                Enable final-payload context preflight (default off)
+              </label>
+              <p className="mt-1 text-xs text-text-muted">Uses verified model limits only. A rough estimate never overrides an upstream limit response.</p>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="text-xs">Context limit override (tokens, blank = model metadata)
+                  <input type="number" min="32768" max="1048576" step="1024" value={context.contextLimit ?? ""} onChange={(e) => setContext((p) => ({ ...p, contextLimit: e.target.value === "" ? null : Number(e.target.value) }))} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-xs">Trigger threshold (% of limit)
+                  <input type="number" min="50" max="100" step="1" value={Math.round(context.triggerThreshold * 100)} onChange={(e) => setContext((p) => ({ ...p, triggerThreshold: Number(e.target.value) / 100 }))} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-xs">Safety margin (%)
+                  <input type="number" min="0" max="30" step="1" value={Math.round(context.safetyMargin * 100)} onChange={(e) => setContext((p) => ({ ...p, safetyMargin: Number(e.target.value) / 100 }))} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-xs">Reserve for output tokens
+                  <input type="number" min="0" max="1048576" step="1024" value={context.outputReserveTokens} onChange={(e) => setContext((p) => ({ ...p, outputReserveTokens: Number(e.target.value) }))} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                </label>
+                <label className="text-xs">Recent turns to protect
+                  <input type="number" min="1" max="20" step="1" value={context.keepRecentTurns} onChange={(e) => setContext((p) => ({ ...p, keepRecentTurns: Number(e.target.value) }))} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm" />
+                </label>
+              </div>
+              <label className="mt-3 flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={context.fallbackCompression} onChange={(e) => setContext((p) => ({ ...p, fallbackCompression: e.target.checked }))} />
+                Lossless duplicate historical tool-output compression (opt-in)
+              </label>
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={context.preferNativeCompaction} onChange={(e) => setContext((p) => ({ ...p, preferNativeCompaction: e.target.checked }))} />
+Avoid proxy compression for Claude clients; native compaction remains client-owned
+              </label>
+            </fieldset>
+          )}
           <div className="flex flex-col gap-2">
             {rows.map((row, i) => {
               const overridden = row.name.trim() in builtin && row.value !== builtin[row.name.trim()];

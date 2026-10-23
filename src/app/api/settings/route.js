@@ -3,6 +3,7 @@ import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
 import bcrypt from "bcryptjs";
+import { normalizeCodeBuddyContext } from "open-sse/config/codebuddyContext.js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,6 +42,29 @@ export async function PATCH(request) {
 
     // Strip protected secrets before any internal handling sets them
     for (const key of PROTECTED_SETTING_KEYS) delete body[key];
+
+    // providerOverrides is also writable through settings PATCH; validate the
+    // CodeBuddy policy here as well as its provider-specific endpoint.
+    if (Object.prototype.hasOwnProperty.call(body, "providerOverrides")) {
+      if (!body.providerOverrides || typeof body.providerOverrides !== "object" || Array.isArray(body.providerOverrides)) {
+        return NextResponse.json({ error: "providerOverrides must be an object" }, { status: 400 });
+      }
+      const current = await getSettings();
+      const merged = { ...(current.providerOverrides || {}), ...body.providerOverrides };
+      for (const [providerId, override] of Object.entries(body.providerOverrides)) {
+        if (!override || typeof override !== "object" || Array.isArray(override)) {
+          return NextResponse.json({ error: `Invalid provider override: ${providerId}` }, { status: 400 });
+        }
+        if (override.context !== undefined) {
+          if (providerId !== "codebuddy-intl") {
+            return NextResponse.json({ error: "Context settings are supported only for codebuddy-intl" }, { status: 400 });
+          }
+          try { merged[providerId] = { ...merged[providerId], context: normalizeCodeBuddyContext(override.context) }; }
+          catch (error) { return NextResponse.json({ error: error.message }, { status: 400 }); }
+        }
+      }
+      body.providerOverrides = merged;
+    }
 
     // If updating password, hash it
     if (body.newPassword) {

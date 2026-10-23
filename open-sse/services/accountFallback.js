@@ -1,4 +1,4 @@
-import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS } from "../config/errorConfig.js";
+import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS, CODEBUDDY_CONTEXT_OVERFLOW_MARKER } from "../config/errorConfig.js";
 
 /**
  * Calculate exponential backoff cooldown for rate limits (429)
@@ -35,6 +35,12 @@ export function checkFallbackError(status, errorText, backoffLevel = 0, provider
   const lowerError = errorText
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
+
+  // Context overflow is always request-scoped. Check before generic text rules
+  // such as "capacity" or "quota exceeded" that would otherwise cool the account.
+  if (lowerError.includes(CODEBUDDY_CONTEXT_OVERFLOW_MARKER)) {
+    return { shouldFallback: false, cooldownMs: 0, requestScoped: true };
+  }
 
   for (const rule of ERROR_RULES) {
     if (rule.provider && rule.provider !== provider) continue;

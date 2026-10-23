@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { PROVIDERS } from "open-sse/config/providers.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
+import { normalizeCodeBuddyContext } from "open-sse/config/codebuddyContext.js";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,16 @@ const BLOCKED_HEADERS = new Set([
  * Validate + normalize an override payload. Returns { override } or { error }.
  * An override with no headers is normalized to null (= delete).
  */
-function normalizeOverride({ headers }) {
+function normalizeOverride({ headers, context }, providerId) {
   const out = {};
 
+  if (context !== undefined && providerId !== "codebuddy-intl") {
+    return { error: "Context settings are supported only for codebuddy-intl" };
+  }
+  if (context !== undefined) {
+    try { out.context = normalizeCodeBuddyContext(context); }
+    catch (error) { return { error: error.message }; }
+  }
   if (headers !== undefined && headers !== null) {
     if (typeof headers !== "object" || Array.isArray(headers)) {
       return { error: "headers must be an object" };
@@ -76,6 +84,7 @@ export async function GET(request, { params }) {
     // truth, so the UI pre-fills exactly what this provider sends upstream.
     return NextResponse.json({
       headers: override.headers || {},
+      context: canonical === "codebuddy-intl" ? normalizeCodeBuddyContext(override.context) : null,
       builtinHeaders: PROVIDERS[canonical]?.headers || {},
     });
   } catch (error) {
@@ -93,16 +102,25 @@ export async function PUT(request, { params }) {
     const { id } = await params;
     const canonical = resolveProviderAlias(id);
     const body = await request.json().catch(() => ({}));
-    const { override, error } = normalizeOverride(body);
+    const { override, error } = normalizeOverride(body, canonical);
     if (error) {
       return NextResponse.json({ error }, { status: 400 });
     }
     const current = await readOverrides();
     const next = { ...current };
-    if (override) next[canonical] = override;
-    else delete next[canonical];
+    if (override) {
+      next[canonical] = {
+        ...override,
+        ...(canonical === "codebuddy-intl"
+          ? { context: override.context ?? current[canonical]?.context ?? normalizeCodeBuddyContext() }
+          : {}),
+      };
+    } else delete next[canonical];
     await updateSettings({ providerOverrides: next });
-    return NextResponse.json({ headers: override?.headers || {} });
+    return NextResponse.json({
+      headers: next[canonical]?.headers || {},
+      context: canonical === "codebuddy-intl" ? normalizeCodeBuddyContext(next[canonical]?.context) : null,
+    });
   } catch (error) {
     console.log("Error saving provider overrides:", error);
     return NextResponse.json({ error: "Failed to save overrides" }, { status: 500 });
