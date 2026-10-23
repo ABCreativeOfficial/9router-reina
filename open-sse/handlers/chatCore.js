@@ -6,6 +6,7 @@ import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
+import { createCodeBuddyContextState } from "../services/codebuddyContext.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
 import { getModelTargetFormat, getModelSupportedFormats, getModelStrip, getModelUpstreamId, getModelType, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
 import { PROVIDERS } from "../config/providers.js";
@@ -219,6 +220,16 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   let translatedBody;
   let toolNameMap;
   let customToolNames;
+  // Preserve source history before translators mutate nested messages; only the
+  // CodeBuddy Intl request-local context reducer may consult it.
+  const requestContext = provider === "codebuddy-intl"
+    ? { sourceBody: structuredClone(body), sourceFormat }
+    : null;
+  if (requestContext) {
+    requestContext.codebuddyContextState = createCodeBuddyContextState({
+      clientTool, requestContext, contextPolicy: providerOverrides?.context,
+    });
+  }
   if (passthrough) {
     log?.debug?.("PASSTHROUGH", `${clientTool} → ${provider} | native lossless`);
     translatedBody = { ...body, model: stripThinkingSuffix(upstreamModel) };
@@ -427,6 +438,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       log,
       proxyOptions,
       providerOverrides,
+      requestContext,
+      requestPolicy: requestContext?.codebuddyContextState.policy || null,
+      recoverRequest: provider === "codebuddy-intl"
+        ? (response, finalBody) => executor.recoverRequest?.(
+          response, finalBody, requestContext, requestContext.codebuddyContextState.policy, log,
+        )
+        : null,
     });
     providerResponse = result.response;
     providerUrl = result.url;
@@ -439,6 +457,13 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
     reqLogger.logTargetRequest(providerUrl, providerHeaders, finalBody);
   } catch (error) {
+    if (provider === "codebuddy-intl" && error?.name === "CodeBuddyContextError") {
+      trackPendingRequest(model, provider, connectionId, false, true);
+      appendRequestLog({ model, provider, connectionId, status: "FAILED 400" }).catch(() => {});
+      const envelope = sourceFormat === FORMATS.CLAUDE ? "anthropic" : "openai";
+      const message = envelope === "anthropic" ? error.message.replace("codebuddy-intl context_length_exceeded. ", "") : error.message;
+      return createErrorResult(HTTP_STATUS.BAD_REQUEST, message, undefined, null, envelope, { contextOverflow: true });
+    }
     trackPendingRequest(model, provider, connectionId, false, true);
     if (error.name === "CodexModelError") {
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, error.message);
@@ -468,8 +493,21 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
 
   // Handle 401/403 - try token refresh (skip for noAuth providers)
   let accountRestricted = false;
+  let contextOverflow = false;
+  let contextInputTokens = null;
+  let contextLimit = null;
+  if (provider === "codebuddy-intl" && typeof executor.isContextOverflow === "function") {
+    try {
+      const overflow = await executor.isContextOverflow(providerResponse.clone());
+      if (overflow) {
+        contextOverflow = true;
+        contextInputTokens = overflow.inputTokens;
+        contextLimit = overflow.contextLimit;
+      }
+    } catch { /* classification below remains authoritative */ }
+  }
   if (
-    !executor.noAuth
+    !contextOverflow && !executor.noAuth
     && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)
   ) {
     // An account restriction (e.g. CodeBuddy 11140) answers 403 but is not a token
@@ -484,7 +522,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   if (accountRestricted) {
     log?.warn?.("TOKEN", `${provider.toUpperCase()} | account restricted upstream, skipping refresh`);
   } else if (
-    !executor.noAuth
+    !contextOverflow && !executor.noAuth
     && (providerResponse.status === HTTP_STATUS.UNAUTHORIZED || providerResponse.status === HTTP_STATUS.FORBIDDEN)
   ) {
     try {
@@ -518,10 +556,19 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
             log,
             proxyOptions,
             providerOverrides,
+            requestContext,
+            requestPolicy: requestContext?.codebuddyContextState.policy || null,
+            recoverRequest: provider === "codebuddy-intl"
+              ? (response, finalBody) => executor.recoverRequest?.(
+                response, finalBody, requestContext, requestContext.codebuddyContextState.policy, log,
+              )
+              : null,
           });
-          if (retryResult.response.ok) {
+          if (retryResult.response.ok || (provider === "codebuddy-intl" && await executor.isContextOverflow?.(retryResult.response.clone()))) {
             providerResponse = retryResult.response;
             providerUrl = retryResult.url;
+            providerHeaders = retryResult.headers;
+            finalBody = retryResult.transformedBody;
             providerResponseFormat = retryResult.responseFormat || targetFormat;
           }
         } catch { log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed`); }
@@ -536,7 +583,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Provider returned error
   if (!providerResponse.ok) {
     trackPendingRequest(model, provider, connectionId, false, true);
-    const { statusCode, message, resetsAtMs } = await parseUpstreamError(providerResponse, executor);
+    const { statusCode, message, resetsAtMs, contextOverflow: parsedContextOverflow, inputTokens, contextLimit: parsedContextLimit } = await parseUpstreamError(providerResponse, executor);
+    contextOverflow = contextOverflow || parsedContextOverflow === true;
+    if (contextOverflow) {
+      contextInputTokens = inputTokens;
+      contextLimit = parsedContextLimit;
+    }
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${statusCode}` }).catch(() => { });
     saveRequestDetail(buildRequestDetail({
       provider, model, connectionId,
@@ -549,13 +601,24 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       status: "error"
     })).catch(() => { });
 
-    const errMsg = formatProviderError(new Error(message), provider, model, statusCode);
+    const isCodeBuddyContextOverflow = provider === "codebuddy-intl" && contextOverflow;
+    const clientError = isCodeBuddyContextOverflow && sourceFormat === FORMATS.CLAUDE
+      ? `prompt is too long: ${message}`
+      : message;
+    const errMsg = formatProviderError(new Error(clientError), provider, model, statusCode);
     if (log?.errorLine) {
       const urlStr = providerUrl ? `\n    URL: ${providerUrl}` : "";
       log.errorLine(reqTag, "✗", `ERROR ${statusCode} · ${provider}/${model} · ${Date.now() - requestStartTime}ms${urlStr}\n    ${errMsg}`);
     }
-    reqLogger.logError(new Error(message), finalBody || translatedBody);
-    return createErrorResult(statusCode, errMsg, resetsAtMs, upstreamResponseHeaders(providerResponse.headers));
+    reqLogger.logError(new Error(clientError), finalBody || translatedBody);
+    return createErrorResult(
+      statusCode,
+      isCodeBuddyContextOverflow ? clientError : errMsg,
+      resetsAtMs,
+      upstreamResponseHeaders(providerResponse.headers),
+      isCodeBuddyContextOverflow && sourceFormat === FORMATS.CLAUDE ? "anthropic" : "openai",
+      isCodeBuddyContextOverflow ? { contextOverflow: true, inputTokens: contextInputTokens, contextLimit } : {},
+    );
   }
 
   const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, pxpipe: pxpipeSummary, reqTag, log };

@@ -27,8 +27,12 @@ export function buildErrorBody(statusCode, message) {
  * @param {string} message - Error message
  * @returns {Response} HTTP Response object
  */
-export function errorResponse(statusCode, message, extraHeaders = null) {
-  return new Response(JSON.stringify(buildErrorBody(statusCode, message)), {
+export function errorResponse(statusCode, message, extraHeaders = null, envelope = "openai") {
+  const body = buildErrorBody(statusCode, message);
+  const payload = envelope === "anthropic"
+    ? { type: "error", error: { type: body.error.type, message: body.error.message } }
+    : body;
+  return new Response(JSON.stringify(payload), {
     status: statusCode,
     headers: {
       "Content-Type": "application/json",
@@ -70,7 +74,7 @@ export async function parseUpstreamError(response, executor = null) {
       const parsed = executor.parseError(response, bodyText);
       if (parsed && typeof parsed === "object") {
         const msg = parsed.message || DEFAULT_ERROR_MESSAGES[response.status] || `Upstream error: ${response.status}`;
-        return { statusCode: parsed.status || response.status, message: msg, resetsAtMs: parsed.resetsAtMs };
+        return { statusCode: parsed.status || response.status, message: msg, resetsAtMs: parsed.resetsAtMs, contextOverflow: parsed.contextOverflow === true, inputTokens: parsed.inputTokens ?? null, contextLimit: parsed.contextLimit ?? null };
       }
     } catch { /* fall through to default parsing */ }
   }
@@ -96,13 +100,14 @@ export async function parseUpstreamError(response, executor = null) {
  * @param {number} [resetsAtMs] - Optional precise cooldown expiry (ms epoch) for provider-specific quota errors
  * @returns {{ success: false, status: number, error: string, response: Response, resetsAtMs?: number }}
  */
-export function createErrorResult(statusCode, message, resetsAtMs, extraHeaders = null) {
+export function createErrorResult(statusCode, message, resetsAtMs, extraHeaders = null, envelope = "openai", metadata = {}) {
   return {
     success: false,
     status: statusCode,
     error: message,
     resetsAtMs,
-    response: errorResponse(statusCode, message, extraHeaders)
+    ...metadata,
+    response: errorResponse(statusCode, message, extraHeaders, envelope)
   };
 }
 
