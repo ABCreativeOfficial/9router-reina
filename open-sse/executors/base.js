@@ -97,7 +97,7 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null }) {
+  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null, requestContext = null, requestPolicy = null, recoverRequest = null }) {
     const fallbackCount = this.getFallbackCount();
     let lastError = null;
     let lastStatus = 0;
@@ -126,7 +126,10 @@ export class BaseExecutor {
 
     for (let urlIndex = 0; urlIndex < fallbackCount; urlIndex++) {
       const url = this.buildUrl(model, stream, urlIndex, credentials);
-      const transformedBody = this.transformRequest(model, body, stream, credentials);
+      let transformedBody = this.transformRequest(model, body, stream, credentials);
+      if (typeof this.prepareRequest === "function") {
+        transformedBody = this.prepareRequest(transformedBody, { model, requestContext, requestPolicy, log });
+      }
       let headers = this.buildHeaders(credentials, stream, url, model, transformedBody);
       // User per-provider override wins over registry headers (blocked names filtered at the API)
       if (providerOverrides?.headers) Object.assign(headers, providerOverrides.headers);
@@ -167,6 +170,41 @@ export class BaseExecutor {
         const ct = response.headers?.get?.("content-type") || "";
         const cl = response.headers?.get?.("content-length") || "?";
         dbg("FETCH", `${this.provider.toUpperCase()} ← ${response.status} | ttft=${Date.now() - fetchT0}ms | ct=${ct} | cl=${cl}`);
+
+        // Provider-specific terminal request errors bypass generic retries. Inspect
+        // only error bodies; never consume or buffer a successful SSE stream here.
+        if (!response.ok && typeof this.prepareError === "function") {
+          let errorBody = "";
+          try { errorBody = await response.clone().text(); } catch { /* preserve original response */ }
+          const preparedError = this.prepareError(response, errorBody);
+          if (preparedError?.terminalRequestError) {
+            let recoveredBody = null;
+            if (typeof recoverRequest === "function" && preparedError.contextOverflow && requestContext && !requestContext.contextRecoveryTried) {
+              requestContext.contextRecoveryTried = true;
+              recoveredBody = await recoverRequest(response, transformedBody, preparedError);
+            }
+            if (recoveredBody && JSON.stringify(recoveredBody) !== JSON.stringify(transformedBody)) {
+              const recoveryCtrl = new AbortController();
+              const recoveryTimer = setTimeout(() => recoveryCtrl.abort(new Error("fetch connect timeout")), timeoutMs);
+              const recoverySignal = signal ? AbortSignal.any([signal, recoveryCtrl.signal]) : recoveryCtrl.signal;
+              try {
+                const recovered = await proxyAwareFetch(url, {
+                  method: "POST", headers, body: JSON.stringify(recoveredBody), signal: recoverySignal,
+                }, proxyOptions);
+                await response.body?.cancel?.().catch?.(() => {});
+                return { response: recovered, url, headers, transformedBody: recoveredBody, contextRecoveryRetry: true };
+              } catch (error) {
+                // A failed recovery attempt is terminal: return the original
+                // upstream context error instead of retrying the same payload.
+                log?.warn?.("CONTEXT", `codebuddy-intl recovery request failed: ${error.message}`);
+                return { response, url, headers, transformedBody, contextRecoveryRetry: true };
+              } finally {
+                clearTimeout(recoveryTimer);
+              }
+            }
+            return { response, url, headers, transformedBody, terminalRequestError: true };
+          }
+        }
 
         if (await tryRetry(urlIndex, response.status, `status ${response.status}`, response)) { urlIndex--; continue; }
 

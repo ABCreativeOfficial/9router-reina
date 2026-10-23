@@ -1,4 +1,6 @@
 import { DefaultExecutor } from "./default.js";
+import { CODEBUDDY_CONTEXT } from "../config/codebuddyContext.js";
+import { prepareCodeBuddyContext, parseCodeBuddyContextError, getCodeBuddyBudget, estimateCodeBuddyContext, compressCompletedToolOutputs } from "../services/codebuddyContext.js";
 import {
   ensureConversationHeaders,
   flattenContent,
@@ -156,6 +158,14 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
     super("codebuddy-intl");
   }
 
+  prepareRequest(body, { model, requestContext, requestPolicy, log }) {
+    const state = requestContext?.codebuddyContextState;
+    if (!state || !requestPolicy) return body;
+    state.policy = requestPolicy;
+    state.model = model;
+    return prepareCodeBuddyContext(body, state, model, log);
+  }
+
   // The gate runs in buildHeaders so a caller that invokes it directly (tests,
   // provider probes) also gets a valid request. finalizeHeaders re-runs it after
   // providerOverrides are merged, because that merge can introduce a duplicate
@@ -189,9 +199,10 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
   }
 
   parseError(response, bodyText) {
+    let data;
+    try { data = JSON.parse(bodyText); } catch { /* Plain-text errors use the same context classifier. */ }
     if (bodyText) {
       try {
-        const data = JSON.parse(bodyText);
         const msg = data?.msg || data?.message || data?.error?.message || "";
         const code = Number(data?.code);
         // The gate's wording may live in msg or in one of the display fields —
@@ -213,6 +224,17 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
               + (msg ? ` — upstream said: ${msg}.` : ".")
               + " No retry, account fallback or header change clears a restriction;"
               + " the account needs recovery on codebuddy.ai (re-login or appeal) before it can be used again.",
+          };
+        }
+
+        const contextError = parseCodeBuddyContextError(bodyText);
+        if (contextError) {
+          return {
+            status: response.status === 401 || response.status === 403 ? 400 : response.status,
+            message: `${contextError.classification}: ${contextError.message}`,
+            contextOverflow: true,
+            inputTokens: contextError.inputTokens,
+            contextLimit: contextError.contextLimit,
           };
         }
 
@@ -303,7 +325,7 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
           };
         }
       } catch {
-        // Non-JSON body — fall through to the default parser.
+        // Unrecognized error shape — preserve the default parser.
       }
     }
     return super.parseError(response, bodyText);
@@ -315,6 +337,54 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
    * parseUpstreamError(). Classification is delegated to parseError() so the two
    * paths cannot drift.
    */
+  async isContextOverflow(response) {
+    if (response.status >= 200 && response.status < 300) return null;
+    try { return parseCodeBuddyContextError(await response.clone().text()); }
+    catch { return null; }
+  }
+
+  prepareError(_response, bodyText) {
+    const overflow = parseCodeBuddyContextError(bodyText);
+    return overflow ? { ...overflow, terminalRequestError: true, contextOverflow: true } : null;
+  }
+
+  async recoverRequest(response, body, requestContext, requestPolicy, log) {
+    let parsed;
+    try { parsed = parseCodeBuddyContextError(await response.clone().text()); }
+    catch { return null; }
+    const state = requestContext?.codebuddyContextState;
+    if (!parsed || !parsed.inputTokenLimit || !parsed.contextLimit || !state || !requestPolicy?.enabled
+      || !requestPolicy.fallbackCompression || (state.nativeCompaction && requestPolicy.preferNativeCompaction)
+      || state.recoveryAttempts >= CODEBUDDY_CONTEXT.maxRecoveryRetries) return null;
+    state.upstreamLimit = parsed.contextLimit;
+    state.reportedInputTokens = parsed.inputTokens;
+    state.policy = requestPolicy;
+    const estimate = estimateCodeBuddyContext(body);
+    const reduced = compressCompletedToolOutputs(structuredClone(body), {
+      keepRecentTurns: requestPolicy.keepRecentTurns,
+      protectedIds: state.protectedIds,
+      contextSource: state.contextSource,
+      sourceFormat: state.sourceFormat,
+    });
+    if (!reduced?.changed) {
+      log?.info?.("CONTEXT", `codebuddy-intl input=${parsed.inputTokens ?? "unknown"} limit=${parsed.contextLimit ?? "unknown"} action=none reason=${reduced?.reason || "unsafe-or-unavailable"}`);
+      return null;
+    }
+    const after = estimateCodeBuddyContext(reduced.body);
+    const { budget, uncertain } = getCodeBuddyBudget(state.model, reduced.body, requestPolicy, parsed.contextLimit, parsed.inputTokenLimit);
+    const reportedSafeBudget = parsed.inputTokenLimit
+      ? Math.floor(parsed.contextLimit * (1 - requestPolicy.safetyMargin))
+      : null;
+    if (uncertain || reportedSafeBudget == null || after >= estimate || after > budget || after > reportedSafeBudget) {
+      log?.info?.("CONTEXT", `codebuddy-intl input=${parsed.inputTokens ?? estimate} after=${after} budget=${budget ?? "unknown"} action=rejected reason=upstream-limit-not-met`);
+      return null;
+    }
+    state.recoveryAttempts++;
+    state.compressed = true;
+    log?.info?.("CONTEXT", `codebuddy-intl input=${parsed.inputTokens ?? estimate} after=${after} budget=${budget} action=retry_exact_duplicate_outputs`);
+    return reduced.body;
+  }
+
   async isAccountRestricted(response) {
     try {
       const text = await response.text();

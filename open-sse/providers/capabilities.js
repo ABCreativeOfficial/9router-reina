@@ -349,6 +349,12 @@ export const PROVIDER_CAPABILITIES = {
     "gpt-5.5-medium": DEVIN_CLI_GPT_CAPS,
     "gpt-5.5-low": DEVIN_CLI_GPT_CAPS,
   },
+  "codebuddy-intl": {
+    // Verified by upstream 11115 response: cbai/deepseek-v4.1-flash reports
+    // 1,048,576 maximum input tokens. Other Intl model limits remain unknown.
+    // Preserve canonical non-context fields: provider overrides short-circuit.
+    "deepseek-v4.1-flash": { ...MODEL_CAPABILITIES["deepseek-v4.1-flash"], contextWindow: 1048576, maxInputTokens: 1048576 },
+  },
   // CodeBuddy.cn — authoritative per-model metadata from the gateway's model
   // config (contextWindow=maxInputTokens, maxOutput=maxOutputTokens, vision=
   // supportsImages). Every model reasons via OpenAI-style reasoning_effort
