@@ -54,6 +54,7 @@ export const ACCOUNT_RESTRICTED_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 // the rule below matches it, and a reworded message cannot silently stop matching.
 export const CODEBUDDY_CHANNEL_MARKER = "codebuddy channel verification";
 export const CODEBUDDY_ACCOUNT_RESTRICTED_MARKER = "codebuddy account restricted";
+export const CODEBUDDY_CONTEXT_OVERFLOW_MARKER = "codebuddy-intl context_overflow request-scoped";
 
 // Cooldown durations (ms)
 const COOLDOWN = {
