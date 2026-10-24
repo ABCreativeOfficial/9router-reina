@@ -73,9 +73,11 @@ describe("resolveReasoningLevel — universal parse, capability-scoped fit", () 
 describe("declared levels match what each lane actually accepts", () => {
   it.each([
     // The generic *mimo*v2.6* pattern withholds "max" for the paid Go lane; the
-    // free and zen lanes accept it (probed). These models cannot disable
-    // thinking, so getThinkingLevels drops "none" from the declared set.
-    ["opencode", "mimo-v2.6-flash-free", ["low", "medium", "high", "xhigh", "max"]],
+    // free and zen lanes accept it (probed). The free lane's MiMo route is
+    // OpenRouter-backed and accepts the full enum including none/minimal, so its
+    // capability entry allows disabling thinking; the zen lane keeps the family
+    // default (no none).
+    ["opencode", "mimo-v2.6-flash-free", ["none", "minimal", "low", "medium", "high", "xhigh", "max"]],
     ["opencode-zen", "mimo-v2.6-flash-free", ["low", "medium", "high", "xhigh", "max"]],
     ["opencode", "deepseek-v4.1-flash-free", ["none", "minimal", "low", "medium", "high", "xhigh", "max"]],
     ["opencode", "glm-5.3-flash-free", ["minimal", "low", "medium", "high", "xhigh", "max"]],
@@ -156,9 +158,11 @@ describe("OpenCode Free DeepSeek/MiMo — native levels survive end to end", () 
   });
 
   it("a canDisable:false model asking for none clamps to a declared level, not to a disable", () => {
-    const out = apply("openai", "mimo-v2.6-flash-free", { reasoning_effort: "none" }, "opencode");
-    expect(out.thinking).toEqual({ type: "enabled" });
-    expect(["low", "medium", "high"]).toContain(out.reasoning_effort);
+    // glm-5.3-flash-free is the canDisable:false case on this lane (the free MiMo
+    // route accepts disabling thinking, so it is not a clamp example any more).
+    const out = apply("openai", "glm-5.3-flash-free", { reasoning_effort: "none" }, "opencode");
+    expect(out.thinking).toBeUndefined();
+    expect(["minimal", "low", "medium", "high"]).toContain(out.reasoning_effort);
   });
 });
 

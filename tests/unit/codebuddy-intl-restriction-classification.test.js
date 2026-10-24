@@ -139,12 +139,16 @@ describe("request-scoped siblings stay request-scoped", () => {
 
   it("does NOT cool the account for a plain 11103 invalid request", () => {
     const out = parse({ code: 11103, msg: "request illegal" });
-    expect(out.message).toMatch(/illegal/i);
+    // The raw phrase is the channel rule's trigger, so the classifier rewords it;
+    // the code and cause still reach the caller.
+    expect(out.message).toMatch(/invalid/i);
+    expect(out.message).not.toMatch(/request illegal/i);
     expect(out.message).not.toContain(CODEBUDDY_CHANNEL_MARKER);
 
     const verdict = checkFallbackError(out.status, out.message, 0, "codebuddy-intl");
     expect(verdict.shouldFallback).toBe(false);
     expect(verdict.cooldownMs).toBe(0);
+    expect(verdict.requestScoped).toBe(true);
   });
 
   it("keeps an unrelated provider's 400 request-scoped", () => {

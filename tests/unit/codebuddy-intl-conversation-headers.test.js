@@ -556,10 +556,13 @@ describe("parseError classifies every 400 variant", () => {
     expect(out.message).toMatch(/normalizeIntlMessages/);
   });
 
-  it("names an illegal request without inventing a channel gate", () => {
+  it("names an invalid request without inventing a channel gate", () => {
     const out = exec.parseError(res(), JSON.stringify({ code: 11103, msg: "request illegal" }));
     expect(out.status).toBe(400);
-    expect(out.message).toMatch(/illegal/i);
+    // Reworded on purpose: the raw phrase is the channel rule's trigger, and a
+    // plain 11103 must not cool the account.
+    expect(out.message).toMatch(/invalid/i);
+    expect(out.message).not.toMatch(/request illegal/i);
     expect(out.message).not.toMatch(/channel verification/i);
   });
 
