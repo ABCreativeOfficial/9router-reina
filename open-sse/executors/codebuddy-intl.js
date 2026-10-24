@@ -317,11 +317,15 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
         }
 
         if (code === CODE_INVALID_REQUEST || RE_REQUEST_ILLEGAL.test(msg)) {
+          // Do not echo the bare upstream phrase "request illegal": ERROR_RULES has a
+          // provider-scoped backoff rule for it (the 11128 channel gate wording), and a
+          // plain 11103 invalid body must stay request-scoped. The code and the upstream
+          // text still reach the caller, so the cause is not lost.
           return {
             status: 400,
             message:
-              `CodeBuddy rejected the request as illegal (${code || "request illegal"}): ${msg || "no message"}`
-              + (data?.displayTips?.en ? ` Upstream said: ${data.displayTips.en}` : ""),
+              `CodeBuddy rejected the request as invalid (${code || "invalid request"}): `
+              + (data?.displayTips?.en || (RE_REQUEST_ILLEGAL.test(msg) ? "the request body was rejected" : msg) || "no message"),
           };
         }
       } catch {

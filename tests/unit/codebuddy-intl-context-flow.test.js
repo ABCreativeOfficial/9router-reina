@@ -167,7 +167,7 @@ describe("CodeBuddy context overflow executor behavior", () => {
     net.fetch.mockResolvedValue(new Response(JSON.stringify({ code: 11103, msg: "bad parameter" }), { status: 400 }));
     const result = await runCore({ messages: [{ role: "user", content: "hello" }] });
     expect(result.contextOverflow).toBeUndefined();
-    expect(result.error).toBe("[400]: CodeBuddy rejected the request as illegal (11103): bad parameter");
+    expect(result.error).toBe("[400]: CodeBuddy rejected the request as invalid (11103): bad parameter");
     expect((await result.response.json()).error.message).toBe(result.error);
   });
 
