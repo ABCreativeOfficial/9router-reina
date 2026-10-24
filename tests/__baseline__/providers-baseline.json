@@ -810,6 +810,12 @@
   "opencode-zen": {
     "baseUrl": "https://opencode.ai/zen/v1/chat/completions",
     "headers": {},
+    "retry": {
+      "429": {
+        "attempts": 2,
+        "delayMs": 500
+      }
+    },
     "usage": {
       "url": "https://opencode.ai/zen/v1/usage"
     },
@@ -852,6 +858,12 @@
     },
     "forceStream": true,
     "noAuth": true,
+    "retry": {
+      "429": {
+        "attempts": 2,
+        "delayMs": 500
+      }
+    },
     "reasoningInject": {
       "scope": "all"
     },

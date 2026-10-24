@@ -96,8 +96,9 @@ export const ERROR_RULES = [
   // --- Text-based rules (checked first, order = priority) ---
   { provider: "codex", text: "model is not supported when using codex with a chatgpt account", cooldownMs: MAX_RATE_LIMIT_COOLDOWN_MS },
   // Intl gateway blocks affect the account/IP, so let the connection back off.
-  { provider: "codebuddy-intl", text: "request illegal", backoff: true },
-  { provider: "codebuddy-intl", text: "conversation id missing", backoff: true },
+  // Match the executor channel marker, not the raw phrase: 11103 reuses
+  // "request illegal" for a malformed body, which must stay request-scoped.
+  { text: CODEBUDDY_CHANNEL_MARKER, backoff: true, accountScoped: true },
   // NVIDIA NIM returns 400 with "degraded" when specific model cluster is unhealthy.
   // Lock only the degraded model (modelScoped: true) without locking the API key.
   { provider: "nvidia", text: "degraded", cooldownMs: 15 * 60 * 1000, modelScoped: true },

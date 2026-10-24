@@ -71,11 +71,15 @@ describe("combo advances past CodeBuddy Intl failures", () => {
     expect(result.status).toBe(200);
   });
 
-  it("does not advance past a request-scoped body error", async () => {
-    // "first message is not system prompt" is this request's fault: the next
-    // member would receive the same broken body, so ending the combo is correct.
+  it("advances past a request-scoped body error and returns its own 400 when every member rejects", async () => {
+    // A request-scoped 400 says this member cannot serve THIS body, not that the
+    // account is unhealthy: members run on different providers with different
+    // validation, so the next member may serve it (upstream 5cdcddf5). With every
+    // member rejecting, the first member's own response is handed back.
     const requestScoped = parse({ code: 11128, msg: "first message is not system prompt" });
-    const handleSingleModel = vi.fn().mockResolvedValue(failure(requestScoped));
+    const handleSingleModel = vi.fn()
+      .mockResolvedValueOnce(failure(requestScoped))
+      .mockResolvedValueOnce(failure(requestScoped));
 
     const result = await handleComboChat({
       body,
@@ -85,7 +89,8 @@ describe("combo advances past CodeBuddy Intl failures", () => {
       comboName: "cbai-combo",
     });
 
-    expect(handleSingleModel).toHaveBeenCalledTimes(1);
+    expect(handleSingleModel).toHaveBeenCalledTimes(2);
     expect(result.status).toBe(400);
+    expect(await result.json()).toMatchObject({ error: { message: expect.stringMatching(/system prompt/i) } });
   });
 });
