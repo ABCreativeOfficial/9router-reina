@@ -132,7 +132,7 @@ export function getModelUpstreamId(aliasOrId, modelId, clientBody = null) {
   // parentheses are part of the alias name — re-appending them would leak a virtual
   // marker into the upstream slug.
   const exact = findModelExact(models, modelId);
-  if (exact) return exact.upstreamModelId || exact.id;
+  if (exact && (aliasOrId === "cx" || aliasOrId === "codex")) return exact.upstreamModelId || exact.id;
 
   // Otherwise treat a trailing "(level)" as the shared thinking suffix: look the
   // base id up and re-append the suffix so downstream applyThinking still sees it
