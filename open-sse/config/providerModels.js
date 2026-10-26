@@ -108,7 +108,7 @@ export function getModelUpstreamId(aliasOrId, modelId, clientBody = null) {
   // parentheses are part of the alias name — re-appending them would leak a virtual
   // marker into the upstream slug.
   const exact = findModelExact(models, modelId);
-  if (exact) return exact.upstreamModelId || exact.id;
+  if (exact && (aliasOrId === "cx" || aliasOrId === "codex")) return exact.upstreamModelId || exact.id;
 
   // Otherwise treat a trailing "(level)" as the shared thinking suffix: look the
   // base id up and re-append the suffix so downstream applyThinking still sees it
@@ -135,7 +135,7 @@ export function getModelUpstreamId(aliasOrId, modelId, clientBody = null) {
 
   // Look for tiered variant first if a tier was requested (e.g. gemini-3.8-flash-high)
   const tieredId = tier ? `${baseId}-${tier}` : null;
-  const found = (tieredId && findModel(models, tieredId, aliasOrId)) || (suffix ? findModel(models, baseId, aliasOrId) : undefined);
+  const found = (tieredId && findModel(models, tieredId, aliasOrId)) || findModel(models, baseId, aliasOrId);
   const resolvedId = found?.upstreamModelId || found?.id;
   if (resolvedId) {
     const presetMatch = resolvedId.match(/\([^()]+\)\s*$/);

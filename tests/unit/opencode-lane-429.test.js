@@ -128,6 +128,10 @@ describe("execute() — bounded retry, no retry loop on quota", () => {
     const out = await fastExecutor().execute({ model: "glm-5.3-flash-free", body: body(), stream: true, credentials: creds });
     expect(out.response.status).toBe(200);
     expect(PROVIDERS.opencode.retry["429"].attempts + 1).toBe(fetchMock.mock.calls.length);
+    // TLS routing survives every bounded retry; proxy resolution still owns the fetch.
+    const transports = fetchMock.mock.calls.map(([, options]) => options.directFetch);
+    expect(transports.every((transport) => typeof transport === "function")).toBe(true);
+    expect(new Set(transports).size).toBe(1);
   });
 
   it("returns the 429 after the bounded attempts are exhausted (no infinite loop)", async () => {

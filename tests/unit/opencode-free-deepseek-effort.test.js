@@ -7,13 +7,11 @@ import { OpenCodeExecutor } from "../../open-sse/executors/opencode.js";
 import "../translator/registerAll.js";
 import { translateRequest } from "../../open-sse/translator/index.js";
 
-// oc/deepseek-v4.1-flash-free (OpenCode Zen free lane) serves exactly low|high|max.
-// The generic *deepseek-v4.* declarations (medium/xhigh) do not apply, and the
-// DeepSeek-API low/medium→high collapse must not swallow "low" — otherwise the
-// model's low tier is unreachable from 9router.
+// Free /inference lane keeps every declared effort; the keyed Zen lane remains
+// low|high|max. The fork probes these lanes separately to prevent silent clamps.
 const MODEL = "deepseek-v4.1-flash-free";
 const PROVIDER = "opencode";
-const LEVELS = ["low", "high", "max"];
+const LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 const effortOnWire = (level, { model = MODEL, provider = PROVIDER, format = FORMATS.OPENAI } = {}) => {
   const body = { model, messages: [], reasoning_effort: level };
@@ -22,15 +20,16 @@ const effortOnWire = (level, { model = MODEL, provider = PROVIDER, format = FORM
 };
 
 describe("oc/deepseek-v4.1-flash-free reasoning levels", () => {
-  it("advertises exactly low|high|max", () => {
+  it("advertises the free lane declared levels", () => {
     expect(getThinkingLevels(PROVIDER, MODEL)).toEqual(LEVELS);
     expect(getThinkingLevels(PROVIDER, `oc/${MODEL}`)).toEqual(LEVELS);
     expect(getThinkingLevels(PROVIDER, `${MODEL}(max)`)).toEqual(LEVELS);
   });
 
   it("resolves the same set through the oc alias and the keyed zen lane", () => {
-    for (const provider of ["oc", "opencode-zen", "ocz"]) {
-      expect(getThinkingLevels(provider, MODEL)).toEqual(LEVELS);
+    expect(getThinkingLevels("oc", MODEL)).toEqual(["low", "high", "max"]);
+    for (const provider of ["opencode-zen", "ocz"]) {
+      expect(getThinkingLevels(provider, MODEL)).toEqual(["low", "high", "max"]);
     }
   });
 
@@ -41,14 +40,14 @@ describe("oc/deepseek-v4.1-flash-free reasoning levels", () => {
     });
   });
 
-  it("forwards low|high|max verbatim", () => {
-    for (const level of LEVELS) expect(effortOnWire(level)).toBe(level);
+  it("forwards enabled declared levels verbatim", () => {
+    for (const level of LEVELS.filter((level) => level !== "none")) expect(effortOnWire(level)).toBe(level);
   });
 
-  it("collapses the levels the model does not serve", () => {
-    expect(effortOnWire("minimal")).toBe("low");
-    expect(effortOnWire("medium")).toBe("high");
-    expect(effortOnWire("xhigh")).toBe("max");
+  it("fits undeclared levels only on the narrower keyed Zen lane", () => {
+    expect(effortOnWire("minimal", { provider: "opencode-zen" })).toBe("low");
+    expect(effortOnWire("medium", { provider: "opencode-zen" })).toBe("high");
+    expect(effortOnWire("xhigh", { provider: "opencode-zen" })).toBe("max");
   });
 
   it("keeps thinking disable working (no effort on the wire)", () => {
@@ -62,13 +61,13 @@ describe("oc/deepseek-v4.1-flash-free reasoning levels", () => {
     expect(effortOnWire("low", { model: "deepseek-v4-pro", provider: "deepseek" })).toBe("high");
   });
 
-  it("keeps the max→high clamp for backends that reject max", () => {
-    expect(effortOnWire("max", { model: "mimo-v2.6-flash", provider: "opencode-go" })).toBe("high");
+  it("fits max to the nearest declared effort for backends that reject max", () => {
+    expect(effortOnWire("max", { model: "mimo-v2.6-flash", provider: "opencode-go" })).toBe("xhigh");
   });
 
   it("sends the requested level to the OpenCode free chat endpoint end to end", () => {
     const executor = new OpenCodeExecutor();
-    for (const level of LEVELS) {
+    for (const level of LEVELS.filter((level) => level !== "none")) {
       // The handler strips the provider prefix before dispatch, so the executor
       // only ever sees the bare upstream id (oc/... → keep it that way).
       const body = {

@@ -19,6 +19,7 @@ import {
   getModelsByProviderId,
   getPublicModelsByProviderId,
   getProviderModels,
+  getModelUpstreamId,
   isValidModel,
 } from "../../open-sse/config/providerModels.js";
 
@@ -96,7 +97,8 @@ describe("Codex public catalog matches the official visible list", () => {
       .filter((m) => (m.kind || m.type) === "image")
       .map((m) => m.id);
     expect(imageIds).toContain("gpt-image-2.5");
-    expect(imageIds).toContain("gpt-5.6-sol-image");
+    expect(imageIds).toContain("gpt-6-sol-image");
+    expect(imageIds).not.toContain("gpt-5.6-sol-image");
     expect(imageIds.length).toBeGreaterThan(5);
   });
 });
@@ -125,6 +127,14 @@ describe("generic *-review aliases are gone", () => {
 });
 
 describe("virtual alias grammar", () => {
+  it("keeps exact Codex aliases without hiding body-selected Antigravity tiers", () => {
+    expect(getModelUpstreamId("cx", "gpt-6-sol-ultra-(fast)")).toBe("gpt-6-sol");
+    expect(getModelUpstreamId("ag", "gemini-3.8-flash", { reasoning_effort: "high" }))
+      .toBe("gemini-3.8-flash-high(high)");
+    expect(getModelUpstreamId("ag", "gemini-3.8-flash", { reasoning: { effort: "low" } }))
+      .toBe("gemini-3.8-flash-low(low)");
+  });
+
   it("lists the generated aliases per model capability", () => {
     const ids = listCodexPublicModelIds();
     // Sol supports ultra and Fast.
