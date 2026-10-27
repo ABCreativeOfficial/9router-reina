@@ -22,6 +22,7 @@ import { toOpenAIFinish } from "../translator/concerns/finishReason.js";
 import { FORMATS } from "../translator/formats.js";
 import { EMPTY_PEEK_DEADLINE_MS } from "../config/runtimeConfig.js";
 import { parseSSELine } from "../utils/streamHelpers.js";
+import { CODEBUDDY_STREAM_ERROR_MARKER } from "../config/errorConfig.js";
 
 // OpenAI chat content test. A chunk counts as content only if it carries
 // assistant output the caller can consume:
@@ -111,6 +112,8 @@ function inspectResponsesEvent(obj) {
 export function inspectSSELine(line) {
   const parsed = parseSSELine(line.trimStart());
   if (!parsed || parsed.done) return { content: false, finishReason: null };
+  // Commit this error frame, not another generation: replay may duplicate tool effects.
+  if (parsed.error?.message === CODEBUDDY_STREAM_ERROR_MARKER) return { content: true, finishReason: null };
   if (typeof parsed.type === "string" && !Array.isArray(parsed.choices)) {
     return parsed.type.startsWith(RESPONSES_EVENT_PREFIX) ? inspectResponsesEvent(parsed) : inspectClaudeEvent(parsed);
   }

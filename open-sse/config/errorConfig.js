@@ -55,6 +55,7 @@ export const ACCOUNT_RESTRICTED_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 export const CODEBUDDY_CHANNEL_MARKER = "codebuddy channel verification";
 export const CODEBUDDY_ACCOUNT_RESTRICTED_MARKER = "codebuddy account restricted";
 export const CODEBUDDY_CONTEXT_OVERFLOW_MARKER = "codebuddy-intl context_overflow request-scoped";
+export const CODEBUDDY_STREAM_ERROR_MARKER = "codebuddy-intl stream failed without replay";
 
 // Cooldown durations (ms)
 const COOLDOWN = {
