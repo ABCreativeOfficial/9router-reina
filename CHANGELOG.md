@@ -18,6 +18,11 @@
 
 # v0.5.111 (2026-10-26)
 
+## Fixes (fork: CodeBuddy Intl sampling and reasoning-summary parity)
+- **Temperature**: reasoning models on CodeBuddy Intl no longer forward a client sampling temperature. IDE factory 353281 (`resolveModelTemperature`) omits the parameter entirely when a reasoning model declares no explicit temperature, and the IDE forces `temperature: 1` for the Kimi family only on its custom-model path. Claude Code sends its own `temperature`, which Kimi-class models reject as `11133`/`400001`. Non-reasoning models and every other provider keep the client value.
+- **reasoning_summary**: no longer invented from `reasoning_effort`. IDE factories 22985/143178 forward `reasoning_summary` only when the model metadata declares one; the value is now capability-gated (`reasoningSummary === true`) so nothing is added for models that never declare it.
+- **Scope/evidence**: both changes are gated on `provider === "codebuddy-intl"` and its own capability table; CN, OpenAI, DeepSeek and other providers are unchanged (control tests). Evidence is static, hash-bound IDE 4.12.1 factory text; no live gateway call was made, so a residual 11133 may still originate elsewhere.
+
 ## Fixes (fork: CodeBuddy Intl all-model request parity and 11133)
 - **All Intl models**: default `X-Model-ID` now follows final `body.model`, not the client thinking-suffixed label; explicit header overrides remain authoritative.
 - **Claude history**: retain actual assistant thinking text (including reasoning-only turns) through the Intl OpenAI translation. Signatures and redacted thinking are not forwarded. Mirror reasoning aliases and use the IDE's evidenced empty-string backfill conditions instead of generic whitespace placeholders. Other providers keep existing translation/injection behavior.

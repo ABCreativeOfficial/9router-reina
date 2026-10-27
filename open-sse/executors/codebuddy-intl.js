@@ -1,6 +1,7 @@
 import { DefaultExecutor } from "./default.js";
 import { normalizeCodeBuddyPayload, normalizeCodeBuddyStream } from "../utils/codebuddyWire.js";
 import { CODEBUDDY_CONTEXT } from "../config/codebuddyContext.js";
+import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { prepareCodeBuddyContext, parseCodeBuddyContextError, getCodeBuddyBudget, estimateCodeBuddyContext, compressCompletedToolOutputs } from "../services/codebuddyContext.js";
 import {
   ensureConversationHeaders,
@@ -214,11 +215,23 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
     const transformed = super.transformRequest(model, normalizeCodeBuddyPayload(body, body.model || model), stream, credentials);
     transformed.stream = true;
 
+    const caps = getCapabilitiesForModel("codebuddy-intl", transformed.model || model);
+    // IDE factory 353281 (resolveModelTemperature) omits `temperature` entirely
+    // for a reasoning model that declares no explicit finite value. Mirror that
+    // shape rather than forwarding the client sampling value. Whether a given
+    // lane rejects an unexpected temperature is not established by this evidence.
+    if (caps.reasoning) delete transformed.temperature;
+
     const eff = transformed.reasoning_effort;
     if (eff === "none" || eff === "off") {
       delete transformed.reasoning_effort;
-    } else if (eff) {
+    }
+    // IDE factories 22985/143178 forward reasoning_summary only when the model
+    // metadata declares one. It is never invented; capabilities opt in explicitly.
+    if (transformed.reasoning_effort && caps.reasoningSummary === true) {
       transformed.reasoning_summary = "auto";
+    } else {
+      delete transformed.reasoning_summary;
     }
 
     // The gateway rejects a bare OpenAI shape (11101 invalid request): it needs a
