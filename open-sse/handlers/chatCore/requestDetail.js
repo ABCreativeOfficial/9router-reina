@@ -1,3 +1,4 @@
+import { summarizeNewApiRequest } from "../../services/newapi/inference.js";
 import { saveRequestUsage, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { COLORS } from "../../utils/stream.js";
 import { canonicalizeUsage } from "../../utils/usageTracking.js";
@@ -80,7 +81,7 @@ export function extractUsageFromResponse(responseBody) {
 }
 
 export function buildRequestDetail(base, overrides = {}) {
-  return {
+  const detail = {
     provider: base.provider || "unknown",
     model: base.model || "unknown",
     connectionId: base.connectionId || undefined,
@@ -95,6 +96,13 @@ export function buildRequestDetail(base, overrides = {}) {
     status: base.status || "success",
     ...overrides
   };
+  if (base.metadataOnly) {
+    detail.request = summarizeNewApiRequest(detail.request);
+    detail.providerRequest = summarizeNewApiRequest(detail.providerRequest);
+    detail.providerResponse = null;
+    detail.response = { finish_reason: detail.response?.finish_reason, type: detail.response?.type };
+  }
+  return detail;
 }
 
 // Build the "done" summary: duration, ttft, in/out tokens with cache breakdown
