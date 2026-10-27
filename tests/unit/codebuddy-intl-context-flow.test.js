@@ -59,6 +59,7 @@ describe("CodeBuddy context overflow executor behavior", () => {
     net.fetch.mockImplementation(async () => overflow());
     const result = await runExecutor(new CodeBuddyIntlExecutor(), body, context);
     expect(net.fetch).toHaveBeenCalledTimes(calls);
+    for (const [, options] of net.fetch.mock.calls) expect(options.redirect).toBe("manual");
     expect(context.codebuddyContextState.recoveryAttempts).toBe(calls - 1);
     if (calls === 2) {
       expect(net.fetch.mock.calls[1][1].body).not.toBe(net.fetch.mock.calls[0][1].body);
@@ -190,6 +191,29 @@ describe("CodeBuddy context overflow executor behavior", () => {
     expect(net.fetch.mock.calls[0][1].body).not.toContain('"id":"a!"');
     expect(net.fetch).toHaveBeenCalledTimes(1); // Changed IDs make source correspondence unverified.
     expect(result.contextOverflow).toBe(true);
+  });
+
+  it("never tees an unread successful upstream during context probing", async () => {
+    net.executor = new CodeBuddyIntlExecutor();
+    const upstream = new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } });
+    net.fetch.mockResolvedValue(upstream);
+    const normalizeResult = vi.spyOn(net.executor, "isContextOverflow");
+    const result = await runCore({ messages: [{ role: "user", content: "hello" }] }, { ...policy, enabled: false });
+    expect(normalizeResult).not.toHaveBeenCalled();
+    expect(result.success).toBe(false); // Empty terminal is an explicit non-replayable failure.
+    expect(result.error).toContain("without replay");
+  });
+
+  it("preserves distinct explicit Responses cache sessions through translation", async () => {
+    net.executor = new CodeBuddyIntlExecutor();
+    net.fetch.mockImplementation(async () => overflow());
+    const run = (key) => runCore({ prompt_cache_key: key, input: [{ role: "user", content: "same opening" }] }, { ...policy, enabled: false }, "openai-responses");
+    await run("source-session-a");
+    await run("source-session-b");
+    await run("source-session-a");
+    const ids = net.fetch.mock.calls.map(([, options]) => options.headers["X-Conversation-ID"]);
+    expect(ids[0]).not.toBe(ids[1]);
+    expect(ids[2]).toBe(ids[0]);
   });
 
   it("keeps source snapshots and recovery state local to concurrent chatCore calls", async () => {

@@ -194,6 +194,9 @@ export function firstUserText(body) {
  */
 export function conversationKey({ credentials = null, body = null, scope = "" } = {}) {
   const headers = credentials?.rawHeaders;
+  if (scope === "codebuddy-intl" && typeof credentials?._codebuddyConversationKey === "string") {
+    return credentials._codebuddyConversationKey;
+  }
   const explicit = firstNonEmpty(
     readHeader(headers, "x-claude-code-session-id"),
     sessionFromUserId(body?.metadata?.user_id),

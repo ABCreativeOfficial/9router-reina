@@ -1,4 +1,4 @@
-import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS, CODEBUDDY_CONTEXT_OVERFLOW_MARKER } from "../config/errorConfig.js";
+import { ERROR_RULES, BACKOFF_CONFIG, TRANSIENT_COOLDOWN_MS, CODEBUDDY_CONTEXT_OVERFLOW_MARKER, CODEBUDDY_STREAM_ERROR_MARKER } from "../config/errorConfig.js";
 
 /**
  * Calculate exponential backoff cooldown for rate limits (429)
@@ -35,6 +35,11 @@ export function checkFallbackError(status, errorText, backoffLevel = 0, provider
   const lowerError = errorText
     ? (typeof errorText === "string" ? errorText : JSON.stringify(errorText)).toLowerCase()
     : "";
+
+  // A failed stream may already have produced output/tool calls: never replay it.
+  if (lowerError.includes(CODEBUDDY_STREAM_ERROR_MARKER)) {
+    return { shouldFallback: false, cooldownMs: 0 };
+  }
 
   // Context overflow is always request-scoped. Check before generic text rules
   // such as "capacity" or "quota exceeded" that would otherwise cool the account.
