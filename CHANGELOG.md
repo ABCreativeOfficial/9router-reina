@@ -18,6 +18,12 @@
 
 # v0.5.111 (2026-10-26)
 
+## Fixes (fork: CodeBuddy IDE payload, streaming and session compatibility)
+- **Payload**: mirror existing nonempty assistant `reasoning`/`reasoning_content` fields without overwriting conflicts; remove duplicate camelCase `reasoningEffort` when canonical `reasoning_effort` exists. Tool outputs, media and instructions remain intact.
+- **Streaming**: add Intl-only, pull-based complete-event SSE normalization for fragmented UTF-8/CRLF/multiline events, usage trailers with `choices: null`, and empty tool-call type. Terminal markers cancel upstream while retaining final content/usage. Malformed/error/fatal-finish streams fail explicitly; nonstream aggregation does not replay a failed stream or penalize an account.
+- **Redirects/session**: refuse automatic Intl POST redirects on initial and context-recovery requests. Capture source session/cache identity before translation, keeping separate sessions distinct even with identical opening text. Other providers retain existing transport defaults.
+- **Evidence/limits**: behavior compared with hash-bound, inert IDE 4.12.1 factory excerpts using REA MCP (955691 wire normalizer; 592571 transport). Static evidence is not a live gateway capture. No device/auth token copying, installer execution or compaction changes; relay-side redirect behavior is outside this local guarantee.
+
 ## Features
 - **Ollama**: add `ollama-local` TTS provider serving the Phonon family (15 tags, 38 preset voices), normalizing the requested format to wav/pcm, falling back to an installed tag and the `default` voice, and wrapping raw PCM in a WAV header so the dashboard can preview it
 - **Ollama**: add `ollama-local` embedding adapter for `/v1/embeddings`, normalizing a saved host that carries a `/v1` or `/v1/embeddings` suffix and sending a bearer token only when an API key is configured; catalog the 14 embedding model families with their dimensions

@@ -97,7 +97,7 @@ export class BaseExecutor {
     return { status: response.status, message: bodyText || `HTTP ${response.status}` };
   }
 
-  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null, directFetch = null, requestContext = null, requestPolicy = null, recoverRequest = null }) {
+  async execute({ model, body, stream, credentials, signal, log, proxyOptions = null, providerOverrides = null, directFetch = null, requestContext = null, requestPolicy = null, recoverRequest = null, redirect = undefined }) {
     const fallbackCount = this.getFallbackCount();
     let lastError = null;
     let lastStatus = 0;
@@ -165,6 +165,7 @@ export class BaseExecutor {
           headers,
           body: bodyStr,
           signal: mergedSignal,
+          ...(redirect ? { redirect } : {}),
           // Protocol adapters that need their own transport (opencode's TLS
           // fingerprint) override the direct path; proxies still take priority.
           ...(directFetch ? { directFetch } : {}),
@@ -193,6 +194,7 @@ export class BaseExecutor {
               try {
                 const recovered = await proxyAwareFetch(url, {
                   method: "POST", headers, body: JSON.stringify(recoveredBody), signal: recoverySignal,
+                  ...(redirect ? { redirect } : {}),
                 }, proxyOptions);
                 await response.body?.cancel?.().catch?.(() => {});
                 return { response: recovered, url, headers, transformedBody: recoveredBody, contextRecoveryRetry: true };

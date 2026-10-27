@@ -1,4 +1,5 @@
 import { DefaultExecutor } from "./default.js";
+import { normalizeCodeBuddyPayload, normalizeCodeBuddyStream } from "../utils/codebuddyWire.js";
 import { CODEBUDDY_CONTEXT } from "../config/codebuddyContext.js";
 import { prepareCodeBuddyContext, parseCodeBuddyContextError, getCodeBuddyBudget, estimateCodeBuddyContext, compressCompletedToolOutputs } from "../services/codebuddyContext.js";
 import {
@@ -158,6 +159,25 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
     super("codebuddy-intl");
   }
 
+  async execute(options) {
+    // Capture source identity before translation drops cache/session fields.
+    const sessionKey = options.requestContext?.codebuddyConversationKey;
+    const credentials = sessionKey
+      ? { ...options.credentials, _codebuddyConversationKey: sessionKey }
+      : options.credentials;
+    // TencentAPIImpl explicitly disables streaming chat redirects (IDE factory 592571).
+    const result = await super.execute({ ...options, credentials, redirect: "manual" });
+    if (result.response.status >= 300 && result.response.status < 400) {
+      void result.response.body?.cancel().catch(() => {});
+      result.response = new Response(JSON.stringify({ error: { message: "CodeBuddy upstream redirect refused" } }), {
+        status: 502, headers: { "Content-Type": "application/json" },
+      });
+    } else {
+      result.response = normalizeCodeBuddyStream(result.response);
+    }
+    return result;
+  }
+
   prepareRequest(body, { model, requestContext, requestPolicy, log }) {
     const state = requestContext?.codebuddyContextState;
     if (!state || !requestPolicy) return body;
@@ -181,7 +201,7 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
   }
 
   transformRequest(model, body, stream, credentials) {
-    const transformed = super.transformRequest(model, body, stream, credentials);
+    const transformed = super.transformRequest(model, normalizeCodeBuddyPayload(body), stream, credentials);
     transformed.stream = true;
 
     const eff = transformed.reasoning_effort;
