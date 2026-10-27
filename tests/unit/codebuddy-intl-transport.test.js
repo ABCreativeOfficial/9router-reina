@@ -16,6 +16,7 @@ const { handleComboChat } = await import("../../open-sse/services/combo.js");
 const { translateRequest } = await import("../../open-sse/translator/index.js");
 const { injectReasoningContent } = await import("../../open-sse/utils/reasoningContentInjector.js");
 const intlRegistry = (await import("../../open-sse/providers/registry/codebuddy-intl.js")).default;
+const { getCapabilitiesForModel } = await import("../../open-sse/providers/capabilities.js");
 const encoder = new TextEncoder();
 const response = (text) => new Response(text, { headers: { "Content-Type": "text/event-stream" } });
 const credentials = { accessToken: "test-token" };
@@ -43,9 +44,36 @@ describe("CodeBuddy IDE transport compatibility", () => {
     expect(payload.messages.find(m => m.tool_calls)?.reasoning_content).toBe("real earlier reasoning");
     expect(payload.messages.find(m => m.reasoning_content === "reasoning-only turn")?.reasoning).toBe("reasoning-only turn");
     expect(options.body).not.toContain("secret-signature");
-    expect(payload.temperature).toBe(0.7); // No unverified forced-temperature override.
+    const caps = getCapabilitiesForModel("codebuddy-intl", model);
+    if (caps.reasoning) {
+      // IDE factory 353281: reasoning models are sent no temperature at all.
+      expect(payload.temperature).toBeUndefined();
+    } else {
+      // No declared capability: keep the client value rather than guess.
+      expect(payload.temperature).toBe(0.7);
+    }
+    // IDE factories 22985/143178: reasoning_summary is never invented.
+    expect(payload.reasoning_summary).toBeUndefined();
     expect(payload.tools[0].function.name).toBe("read");
     await result.response.body.cancel();
+  });
+
+  it("keeps client temperature for non-reasoning Intl models only", () => {
+    const executor=new CodeBuddyIntlExecutor();
+    const body={model:"test",temperature:0.7,messages:[{role:"user",content:"hi"}]};
+    // Unknown/test model on Intl has no declared reasoning capability.
+    const caps=(bodyModel)=>executor.transformRequest(bodyModel,{...body,model:bodyModel},true,credentials);
+    expect(caps("some-non-reasoning-model").temperature).toBe(0.7);
+    expect(caps("kimi-k3").temperature).toBeUndefined();
+    expect(caps("glm-5.2").temperature).toBeUndefined();
+  });
+
+  it("leaves other providers' temperature handling untouched", () => {
+    for (const provider of ["codebuddy-cn", "deepseek", "openai"]) {
+      const transformed = new DefaultExecutor(provider).transformRequest("kimi-k2.5", { model: "kimi-k2.5", temperature: 0.7, messages: [{ role: "user", content: "hi" }] }, true, credentials);
+      expect(transformed.temperature).toBe(0.7);
+      expect(transformed.reasoning_summary).toBeUndefined();
+    }
   });
 
   it("preserves explicit model header override while using payload model by default", () => {
@@ -217,14 +245,30 @@ describe("CodeBuddy IDE transport compatibility", () => {
     expect(json.choices[0].message.content).toBe("ok");
     expect(json.choices[0].message.tool_calls[0].function.arguments).toBe('{"p":"a"}');
     expect(json.usage.total_tokens).toBe(6);
+    // The aggregator itself keeps the reasoning; the non-streaming OpenAI return
+    // path deliberately drops it when content exists (global policy, see below).
+    expect(json.choices[0].message.reasoning_content).toBe("think");
     for (const format of ["openai", "claude"]) {
       const result = await handleForcedSSEToJson({ providerResponse: normalizeCodeBuddyStream(response(text)), provider: "codebuddy-intl",
         sourceFormat: format, targetFormat: "openai", model: "test", body: {}, requestStartTime: Date.now(), trackDone() {}, appendLog() {} });
       expect(result.success).toBe(true);
       const payload = await result.response.json();
       expect(payload.usage).toMatchObject(format === "claude" ? { input_tokens: 4, output_tokens: 2 } : { total_tokens: 6 });
-      if (format === "claude") expect(payload.content).toContainEqual({ type: "tool_use", id: "call_a", name: "read", input: { p: "a" } });
-      else expect(payload.choices[0].message.tool_calls[0].function.arguments).toBe('{"p":"a"}');
+      if (format === "claude") {
+        expect(payload.content).toContainEqual({ type: "tool_use", id: "call_a", name: "read", input: { p: "a" } });
+        // The non-streaming path strips reasoning_content before converting to an
+        // Anthropic Message, so no thinking block is delivered here. This is the
+        // pre-existing provider-agnostic policy; streaming (asserted below) is the
+        // path Claude Code actually uses and does carry thinking.
+        expect(payload.content.find((b) => b.type === "thinking")).toBeUndefined();
+      } else {
+        expect(payload.choices[0].message.tool_calls[0].function.arguments).toBe('{"p":"a"}');
+        // sseToJsonHandler strips reasoning_content from a non-streaming Chat
+        // Completions body when content is non-empty (provider-agnostic policy),
+        // so an OpenAI client receives no thinking here. Streaming does carry it
+        // (asserted below), and the empty-content exception is covered separately.
+        expect(payload.choices[0].message.reasoning_content).toBeUndefined();
+      }
     }
     for (const format of ["openai", "claude"]) {
       const transform = format === "openai" ? createPassthroughStreamWithLogger("codebuddy-intl")
@@ -232,7 +276,22 @@ describe("CodeBuddy IDE transport compatibility", () => {
       const out = await new Response(normalizeCodeBuddyStream(response(text)).body.pipeThrough(transform)).text();
       expect(out).toContain("ok");
       expect(out).toContain(format === "claude" ? "tool_use" : "tool_calls");
+      expect(out).toContain("think");
+      expect(out).toContain(format === "claude" ? "thinking_delta" : "reasoning_content");
     }
+  });
+
+  it("keeps reasoning for a non-streaming OpenAI client when content is empty", async () => {
+    const text = [
+      { id: "c1", model: "test", choices: [{ index: 0, delta: { role: "assistant", reasoning_content: "think" } }] },
+      { choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { total_tokens: 1 }, done: true },
+    ].map((p) => `data: ${JSON.stringify(p)}
+
+`).join("");
+    const result = await handleForcedSSEToJson({ providerResponse: normalizeCodeBuddyStream(response(text)), provider: "codebuddy-intl",
+      sourceFormat: "openai", targetFormat: "openai", model: "test", body: {}, requestStartTime: Date.now(), trackDone() {}, appendLog() {} });
+    const payload = await result.response.json();
+    expect(payload.choices[0].message.reasoning_content).toBe("think");
   });
 
   it.each(["openai", "claude"])("surfaces stream errors to %s clients without successful completion", async (format) => {
