@@ -1,12 +1,19 @@
 // IDE 4.12.1 factory 955691: request reasoning aliases and SSE wire repairs.
 // ponytail: provider-local compatibility only; no SDK defaults or tool-output coercion.
-export function normalizeCodeBuddyPayload(body) {
+export function normalizeCodeBuddyPayload(body, model = body.model || "") {
+  const hasReasoning = message => [message?.reasoning, message?.reasoning_content].some(value => typeof value === "string" && value.trim());
+  const thinkingEnabled = !!body.reasoning_effort || (body.thinking && body.thinking.type !== "disabled" && body.thinking.type !== false)
+    || (typeof body.reasoning?.effort === "string" && !!body.reasoning.effort);
+  // Exact conditions from IDE factory 955691; empty strings are not generated reasoning.
+  const backfill = /deepseek|kimi/i.test(model) || /(?:^|[:/])mimo-v\d+(?:\.\d+)*(?:-[a-z0-9.-]+)?$/i.test(model)
+    || (thinkingEnabled && Array.isArray(body.messages) && body.messages.some(message => message?.role === "assistant" && hasReasoning(message)));
   const messages = Array.isArray(body.messages) ? body.messages.map((message) => {
     if (message?.role !== "assistant") return message;
     const reasoning = typeof message.reasoning === "string" && message.reasoning.trim();
     const content = typeof message.reasoning_content === "string" && message.reasoning_content.trim();
     if (reasoning && !content) return { ...message, reasoning_content: message.reasoning };
     if (content && !reasoning) return { ...message, reasoning: message.reasoning_content };
+    if (!content && !reasoning && backfill) return { ...message, reasoning: "", reasoning_content: "" };
     return message;
   }) : null;
   const result = { ...body, ...(messages ? { messages } : {}) };

@@ -18,6 +18,12 @@
 
 # v0.5.111 (2026-10-26)
 
+## Fixes (fork: CodeBuddy Intl all-model request parity and 11133)
+- **All Intl models**: default `X-Model-ID` now follows final `body.model`, not the client thinking-suffixed label; explicit header overrides remain authoritative.
+- **Claude history**: retain actual assistant thinking text (including reasoning-only turns) through the Intl OpenAI translation. Signatures and redacted thinking are not forwarded. Mirror reasoning aliases and use the IDE's evidenced empty-string backfill conditions instead of generic whitespace placeholders. Other providers keep existing translation/injection behavior.
+- **Model request rejection**: classify observed `11133` / `extError 400001` as a request rejection with bounded identifier-only diagnostics; omit upstream Request/Response/message blobs. Skip identical retries, token refresh and account cooldown/rotation; existing request-scoped combo fallback remains available.
+- **Evidence/limits**: REA analyzed exact IDE 4.12.1 request/history factories. This fixes proven header/history discrepancies, not a proven universal cause for every 11133. No guessed Intl model IDs, forced Kimi temperature, effort downgrades, CN catalog copying, or live gateway calls.
+
 ## Fixes (fork: CodeBuddy IDE payload, streaming and session compatibility)
 - **Payload**: mirror existing nonempty assistant `reasoning`/`reasoning_content` fields without overwriting conflicts; remove duplicate camelCase `reasoningEffort` when canonical `reasoning_effort` exists. Tool outputs, media and instructions remain intact.
 - **Streaming**: add Intl-only, pull-based complete-event SSE normalization for fragmented UTF-8/CRLF/multiline events, usage trailers with `choices: null`, and empty tool-call type. Terminal markers cancel upstream while retaining final content/usage. Malformed/error/fatal-finish streams fail explicitly; nonstream aggregation does not replay a failed stream or penalize an account.

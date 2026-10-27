@@ -9,6 +9,7 @@ import {
 import {
   CODEBUDDY_CHANNEL_MARKER,
   CODEBUDDY_ACCOUNT_RESTRICTED_MARKER,
+  CODEBUDDY_REQUEST_REJECTED_MARKER,
 } from "../config/errorConfig.js";
 import {
   refreshCodebuddyIntlToken,
@@ -172,6 +173,15 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
       result.response = new Response(JSON.stringify({ error: { message: "CodeBuddy upstream redirect refused" } }), {
         status: 502, headers: { "Content-Type": "application/json" },
       });
+    } else if (!result.response.ok) {
+      const parsed = this.parseError(result.response, await result.response.clone().text());
+      if (parsed.message?.startsWith(CODEBUDDY_REQUEST_REJECTED_MARKER)) {
+        result.terminalRequestError = true;
+        result.requestRejected = true;
+        if (result.response.status !== 400) {
+          result.response = new Response(result.response.body, { status: 400, headers: result.response.headers });
+        }
+      }
     } else {
       result.response = normalizeCodeBuddyStream(result.response);
     }
@@ -193,15 +203,15 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
   buildHeaders(credentials, stream = true, url, model, body = null) {
     // The gateway always streams, including when the downstream client wants JSON.
     const headers = super.buildHeaders(credentials, true, url, model, body);
-    return ensureConversationHeaders(headers, body, { credentials, model, scope: "codebuddy-intl" });
+    return ensureConversationHeaders(headers, body, { credentials, model: body?.model || model, scope: "codebuddy-intl" });
   }
 
   finalizeHeaders(headers, { credentials, body, model } = {}) {
-    return ensureConversationHeaders(headers, body, { credentials, model, scope: "codebuddy-intl" });
+    return ensureConversationHeaders(headers, body, { credentials, model: body?.model || model, scope: "codebuddy-intl" });
   }
 
   transformRequest(model, body, stream, credentials) {
-    const transformed = super.transformRequest(model, normalizeCodeBuddyPayload(body), stream, credentials);
+    const transformed = super.transformRequest(model, normalizeCodeBuddyPayload(body, body.model || model), stream, credentials);
     transformed.stream = true;
 
     const eff = transformed.reasoning_effort;
@@ -221,6 +231,18 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
   parseError(response, bodyText) {
     let data;
     try { data = JSON.parse(bodyText); } catch { /* Plain-text errors use the same context classifier. */ }
+    if (Number(data?.code) === 11133) {
+      // Observed model-provider rejection, not an account ban or network failure.
+      // Only bounded identifiers: never serialize extError.Request/Response/message.
+      const safe = (value) => (typeof value === "string" || typeof value === "number")
+        && /^[a-zA-Z0-9_.:\[\]-]{1,96}$/.test(String(value)) ? String(value) : "";
+      const details = [["upstream", data?.extError?.code], ["type", data?.extError?.type],
+        ["param", data?.extError?.param], ["requestId", data?.requestId]]
+        .flatMap(([key, value]) => safe(value) ? [`${key}=${safe(value)}`] : []);
+      return { status: 400, message: `${CODEBUDDY_REQUEST_REJECTED_MARKER} (11133): the model provider rejected this request.`
+        + (details.length ? ` ${details.join(" ")}.` : "")
+        + " The upstream did not identify a proven cause; start a new conversation or switch models. Account refresh/retry cannot repair rejected parameters." };
+    }
     if (bodyText) {
       try {
         const msg = data?.msg || data?.message || data?.error?.message || "";
@@ -363,11 +385,16 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
    */
   async isContextOverflow(response) {
     if (response.status >= 200 && response.status < 300) return null;
-    try { return parseCodeBuddyContextError(await response.clone().text()); }
-    catch { return null; }
+    try {
+      const text = await response.clone().text();
+      return this.parseError(response, text)?.contextOverflow ? parseCodeBuddyContextError(text) : null;
+    } catch { return null; }
   }
 
   prepareError(_response, bodyText) {
+    if (this.parseError(_response, bodyText)?.message?.startsWith(CODEBUDDY_REQUEST_REJECTED_MARKER)) {
+      return { terminalRequestError: true };
+    }
     const overflow = parseCodeBuddyContextError(bodyText);
     return overflow ? { ...overflow, terminalRequestError: true, contextOverflow: true } : null;
   }

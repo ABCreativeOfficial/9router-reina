@@ -56,6 +56,7 @@ export const CODEBUDDY_CHANNEL_MARKER = "codebuddy channel verification";
 export const CODEBUDDY_ACCOUNT_RESTRICTED_MARKER = "codebuddy account restricted";
 export const CODEBUDDY_CONTEXT_OVERFLOW_MARKER = "codebuddy-intl context_overflow request-scoped";
 export const CODEBUDDY_STREAM_ERROR_MARKER = "codebuddy-intl stream failed without replay";
+export const CODEBUDDY_REQUEST_REJECTED_MARKER = "codebuddy-intl model request rejected";
 
 // Cooldown durations (ms)
 const COOLDOWN = {

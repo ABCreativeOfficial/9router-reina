@@ -11,7 +11,7 @@ function stripAnthropicBillingHeader(text) {
 }
 
 // Convert Claude request to OpenAI format
-export function claudeToOpenAIRequest(model, body, stream) {
+export function claudeToOpenAIRequest(model, body, stream, credentials = null, options = {}) {
   const result = {
     model: model,
     messages: [],
@@ -46,7 +46,7 @@ export function claudeToOpenAIRequest(model, body, stream) {
   if (body.messages && Array.isArray(body.messages)) {
     for (let i = 0; i < body.messages.length; i++) {
       const msg = body.messages[i];
-      const converted = convertClaudeMessage(msg);
+      const converted = convertClaudeMessage(msg, options.provider === "codebuddy-intl");
       if (converted) {
         // Handle array of messages (multiple tool results)
         if (Array.isArray(converted)) {
@@ -141,7 +141,7 @@ function systemReminderText(content) {
 }
 
 // Convert single Claude message - returns single message or array of messages
-function convertClaudeMessage(msg) {
+function convertClaudeMessage(msg, preserveReasoning = false) {
   // Some clients send content as a single block object; normalize to the
   // one-element array every branch below (the system-reminder fold included)
   // expects. Must run BEFORE the role branch: systemReminderText only reads
@@ -167,6 +167,11 @@ function convertClaudeMessage(msg) {
     const parts = [];
     const toolCalls = [];
     const toolResults = [];
+    // IDE factory 22985 retains actual assistant reasoning, never signatures/redacted blocks.
+    const reasoning = preserveReasoning && role === ROLE.ASSISTANT
+      ? msg.content.filter(block => block?.type === CLAUDE_BLOCK.THINKING && typeof block.thinking === "string")
+        .map(block => block.thinking).join("")
+      : "";
 
     for (const block of msg.content) {
       switch (block.type) {
@@ -249,14 +254,16 @@ function convertClaudeMessage(msg) {
         result.content = collapseTextParts(parts);
       }
       result.tool_calls = toolCalls;
+      if (reasoning) result.reasoning_content = reasoning;
       return result;
     }
 
     // Return content
-    if (parts.length > 0) {
+    if (parts.length > 0 || reasoning) {
       return {
         role,
-        content: collapseTextParts(parts)
+        content: collapseTextParts(parts),
+        ...(reasoning ? { reasoning_content: reasoning } : {})
       };
     }
     

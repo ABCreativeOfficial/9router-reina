@@ -163,6 +163,39 @@ describe("CodeBuddy context overflow executor behavior", () => {
     expect(net.fetch).toHaveBeenCalledTimes(3);
   });
 
+  it.each([400, 403, 500])("classifies 11133 as model request rejection without retries/refresh/locks (%s)", async (status) => {
+    net.executor = new CodeBuddyIntlExecutor();
+    const refresh = vi.spyOn(net.executor, "refreshCredentials");
+    net.fetch.mockResolvedValue(new Response(JSON.stringify({ code: 11133, msg: "Invalid request parameters", requestId: "01a17b21d49f7000a248fdb8354eae7c",
+      extError: { code: "400001", type: "invalid_request_error", param: "", message: "quota exceeded account restricted secret-body", Request: "secret-request", Response: "secret-response" } }), { status }));
+    const result = await runCore({ messages: [{ role: "user", content: "hello" }] });
+    expect(result.status).toBe(400);
+    expect(result.error).toContain("11133");
+    expect(result.error).toContain("400001");
+    expect(result.error).not.toContain("secret");
+    expect(result.contextOverflow).toBeUndefined();
+    expect(net.fetch).toHaveBeenCalledOnce();
+    expect(refresh).not.toHaveBeenCalled();
+    net.getProviderConnections.mockResolvedValue([{ id: "test-only", backoffLevel: 0 }]);
+    expect((await markAccountUnavailable("test-only", result.status, result.error, "codebuddy-intl", "unknown-model")).shouldFallback).toBe(false);
+    expect(net.updateProviderConnection).not.toHaveBeenCalled();
+  });
+
+  it.each(["context-recovery", "auth-refresh"])("retains terminal 11133 on secondary execution: %s", async (path) => {
+    net.executor = new CodeBuddyIntlExecutor();
+    const refresh = vi.spyOn(net.executor, "refreshCredentials").mockResolvedValue({ accessToken: "fake-refreshed-token" });
+    net.fetch.mockResolvedValueOnce(path === "context-recovery" ? overflow() : new Response("expired", { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: 11133, extError: { code: "400001" } }), { status: 403 }));
+    const result = await runCore(duplicateHistory(), { ...policy, fallbackCompression: true, keepRecentTurns: 1 });
+    expect(result.status).toBe(400);
+    expect(result.error).toContain("11133");
+    expect(net.fetch).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(path === "auth-refresh" ? 1 : 0);
+    net.getProviderConnections.mockResolvedValue([{ id: "test-only", backoffLevel: 0 }]);
+    expect((await markAccountUnavailable("test-only", result.status, result.error, "codebuddy-intl", "unknown-model")).shouldFallback).toBe(false);
+    expect(net.updateProviderConnection).not.toHaveBeenCalled();
+  });
+
   it("preserves non-context upstream error formatting", async () => {
     net.executor = new CodeBuddyIntlExecutor();
     net.fetch.mockResolvedValue(new Response(JSON.stringify({ code: 11103, msg: "bad parameter" }), { status: 400 }));
