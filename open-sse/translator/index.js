@@ -98,8 +98,13 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   // Expose to downstream translators (gemini-cli/antigravity envelopes) that run after envelope is stripped
   if (credentials) credentials._clientSessionId = clientSessionId;
 
+  // One options bag for every translator call on this request: upstream passes it
+  // to the direct/step translators and to filterToOpenAIFormat, so the custom
+  // provider identity and reasoning-preservation flag ride along with it.
   const translationOptions = {
     preserveCacheControl: targetFormat === FORMATS.OPENAI && !!PROVIDERS[provider]?.quirks?.preserveCacheControl,
+    provider,
+    preserveReasoning: provider === "codebuddy-intl",
   };
 
   // If same format, skip translation steps
