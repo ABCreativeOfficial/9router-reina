@@ -161,6 +161,9 @@ function systemReminderText(content) {
 
 // Convert single Claude message - returns single message or array of messages
 function convertClaudeMessage(msg, opts = {}) {
+  // Upstream passes the shared options bag (cache-control retention); the custom
+  // reasoning-history rule is derived from the same bag so there is one contract.
+  const preserveReasoning = opts.provider === "codebuddy-intl" || opts.preserveReasoning === true;
   // Some clients send content as a single block object; normalize to the
   // one-element array every branch below (the system-reminder fold included)
   // expects. Must run BEFORE the role branch: systemReminderText only reads
@@ -186,6 +189,11 @@ function convertClaudeMessage(msg, opts = {}) {
     const parts = [];
     const toolCalls = [];
     const toolResults = [];
+    // IDE factory 22985 retains actual assistant reasoning, never signatures/redacted blocks.
+    const reasoning = preserveReasoning && role === ROLE.ASSISTANT
+      ? msg.content.filter(block => block?.type === CLAUDE_BLOCK.THINKING && typeof block.thinking === "string")
+        .map(block => block.thinking).join("")
+      : "";
 
     for (const block of msg.content) {
       switch (block.type) {
@@ -270,14 +278,16 @@ function convertClaudeMessage(msg, opts = {}) {
         result.content = collapseTextParts(parts, opts);
       }
       result.tool_calls = toolCalls;
+      if (reasoning) result.reasoning_content = reasoning;
       return result;
     }
 
     // Return content
-    if (parts.length > 0) {
+    if (parts.length > 0 || reasoning) {
       return {
         role,
-        content: collapseTextParts(parts, opts)
+        content: collapseTextParts(parts, opts),
+        ...(reasoning ? { reasoning_content: reasoning } : {})
       };
     }
     

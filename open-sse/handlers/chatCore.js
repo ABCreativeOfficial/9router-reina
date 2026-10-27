@@ -567,7 +567,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
               )
               : null,
           });
-          if (retryResult.response.ok || (provider === "codebuddy-intl" && await executor.isContextOverflow?.(retryResult.response.clone()))) {
+          if (retryResult.response.ok || (provider === "codebuddy-intl" && (retryResult.requestRejected || await executor.isContextOverflow?.(retryResult.response.clone())))) {
             providerResponse = retryResult.response;
             providerUrl = retryResult.url;
             providerHeaders = retryResult.headers;
