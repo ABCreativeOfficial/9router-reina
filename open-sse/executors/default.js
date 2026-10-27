@@ -9,6 +9,9 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
 import { extractClaudeSessionIdFromUserId } from "../utils/claudeCloaking.js";
+import { isNewApiChat, parseNewApiError, summarizeNewApiRequest } from "../services/newapi/inference.js";
+
+const newApiErrors = new WeakMap();
 
 // Auth header descriptors — derived from registry transport.auth, fallback to hardcoded defaults.
 const BEARER = { combined: true, header: "Authorization", scheme: "bearer" };
@@ -107,6 +110,30 @@ export class DefaultExecutor extends BaseExecutor {
     }
 
     return injectReasoningContent({ provider: this.provider, model, body: transformed });
+  }
+
+  async execute(options) {
+    if (!isNewApiChat(this.provider, options.credentials)) return super.execute(options);
+    const result = await super.execute(options);
+    if (result.response.ok) return result;
+    const { response } = result;
+    let bodyText = "";
+    try { bodyText = await response.text(); } catch { /* retain the upstream HTTP status */ }
+    const parsed = parseNewApiError(response, bodyText,
+      [options.credentials?.apiKey, options.credentials?.accessToken], summarizeNewApiRequest(result.transformedBody));
+    // Consume errors only. Successful SSE retains its original backpressure.
+    result.response = new Response(JSON.stringify({ error: { message: parsed.message } }), {
+      status: response.status, headers: { "content-type": "application/json", ...Object.fromEntries(
+        [...response.headers].filter(([key]) => ["x-request-id", "x-oneapi-request-id", "retry-after"].includes(key)),
+      ) },
+    });
+    newApiErrors.set(result.response, parsed);
+    return result;
+  }
+
+  parseError(response, bodyText) {
+    if (newApiErrors.has(response)) return newApiErrors.get(response);
+    return super.parseError(response, bodyText);
   }
 
   applyNousAttribution(model, body, stream, credentials) {

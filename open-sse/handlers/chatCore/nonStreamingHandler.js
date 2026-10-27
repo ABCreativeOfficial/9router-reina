@@ -12,7 +12,7 @@ import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
-import { ensureAnthropicMessage } from "../../translator/concerns/anthropicMessage.js";
+import { ensureAnthropicMessage, chatCompletionToAnthropicMessage } from "../../translator/concerns/anthropicMessage.js";
 
 /**
  * Convert an OpenAI Chat Completions non-streaming response body into the
@@ -238,7 +238,7 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
 /**
  * Handle non-streaming response from provider.
  */
-export async function handleNonStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log }) {
+export async function handleNonStreamingResponse({ preserveReasoning = false, providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log }) {
   trackDone();
   const contentType = providerResponse.headers.get("content-type") || "";
   let responseBody;
@@ -288,9 +288,11 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
 
   const usage = extractUsageFromResponse(responseBody);
 
-  const translatedResponse = needsTranslation(targetFormat, sourceFormat)
-    ? translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames)
-    : responseBody;
+  const translatedResponse = preserveReasoning && targetFormat === FORMATS.OPENAI && sourceFormat === FORMATS.CLAUDE
+    ? chatCompletionToAnthropicMessage(responseBody, { includeThinking: true })
+    : needsTranslation(targetFormat, sourceFormat)
+      ? translateNonStreamingResponse(responseBody, targetFormat, sourceFormat, customToolNames)
+      : responseBody;
 
   // Claude clients do a non-streaming retry after a broken stream and treat a
   // 200 that is not an Anthropic Message as a second failure. Validate the
@@ -348,7 +350,7 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   // Strip reasoning_content only when content is non-empty.
   // When content is empty (e.g. thinking models that used all tokens for reasoning),
   // reasoning_content is the only useful output and must be preserved.
-  if (!isClaudeMessageResponse && !isResponsesResponse && translatedResponse?.choices) {
+  if (!preserveReasoning && !isClaudeMessageResponse && !isResponsesResponse && translatedResponse?.choices) {
     for (const choice of translatedResponse.choices) {
       if (choice?.message?.reasoning_content && choice.message.content) {
         delete choice.message.reasoning_content;
@@ -360,7 +362,7 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
 
   const totalLatency = Date.now() - requestStartTime;
   saveRequestDetail(buildRequestDetail({
-    provider, model, connectionId,
+    metadataOnly: preserveReasoning, provider, model, connectionId,
     latency: { ttft: totalLatency, total: totalLatency },
     tokens: usage || { prompt_tokens: 0, completion_tokens: 0 },
     request: extractRequestConfig(body, stream),

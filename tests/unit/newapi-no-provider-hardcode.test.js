@@ -14,6 +14,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const NEW_API_SOURCES = [
   "open-sse/services/newapi/client.js",
   "open-sse/services/newapi/definition.js",
+  "open-sse/services/newapi/inference.js",
   "open-sse/services/newapi/resolve.js",
   "open-sse/services/newapi/tokenPolicy.js",
   "open-sse/services/newapi/usage.js",

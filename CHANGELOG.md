@@ -18,6 +18,11 @@
 
 # v0.5.111 (2026-10-26)
 
+## Fixes (fork: New API template inference parity and diagnostics)
+- **Template-scoped reasoning**: New API Chat connections retain genuine Claude reasoning and reasoning-only history, preserve explicit effort/suffix values, and return reasoning in JSON responses for replay. Ordinary compatible nodes, native providers and Responses nodes retain existing behavior. No model lists or deployment origins are hardcoded.
+- **Upstream errors/privacy**: preserve upstream HTTP status and bounded error message/code/type/param plus request correlation and final payload counters. Drop envelope payload echoes and redact credentials. New API request logs store content-free metadata instead of raw prompts, schemas, reasoning or authorization headers. Existing account-model restrictions and token-saver configuration remain unchanged.
+- **Evidence/limitations**: direct synthetic probes completed HTTP 200 with 759 messages and 218 tools together, and with tool history both with and without reasoning. Counts alone and missing reasoning alone do not establish the historical 400 cause. Failed historical payloads were already truncated. No payload clipping, guessed context-limit rejection or recovery retry was added. The reported deployment also accepts disabled thinking despite the native MiniMax documentation, so no model-specific disable override was imposed.
+
 ## Fixes (fork: CodeBuddy Intl sampling and reasoning-summary parity)
 - **Temperature**: reasoning models on CodeBuddy Intl no longer forward a client sampling temperature. IDE factory 353281 (`resolveModelTemperature`) omits the parameter entirely when a reasoning model declares no explicit temperature, and the IDE forces `temperature: 1` for the Kimi family only on its custom-model path. Claude Code sends its own `temperature`, which Kimi-class models reject as `11133`/`400001`. Non-reasoning models and every other provider keep the client value.
 - **reasoning_summary**: no longer invented from `reasoning_effort`. IDE factories 22985/143178 forward `reasoning_summary` only when the model metadata declares one; the value is now capability-gated (`reasoningSummary === true`) so nothing is added for models that never declare it.

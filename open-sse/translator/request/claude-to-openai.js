@@ -46,7 +46,7 @@ export function claudeToOpenAIRequest(model, body, stream, credentials = null, o
   if (body.messages && Array.isArray(body.messages)) {
     for (let i = 0; i < body.messages.length; i++) {
       const msg = body.messages[i];
-      const converted = convertClaudeMessage(msg, options.provider === "codebuddy-intl");
+      const converted = convertClaudeMessage(msg, options.provider === "codebuddy-intl" || options.preserveReasoning === true);
       if (converted) {
         // Handle array of messages (multiple tool results)
         if (Array.isArray(converted)) {
