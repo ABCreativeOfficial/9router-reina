@@ -5,12 +5,13 @@ import { cloakClaudeTools, decloakStreamChunk } from "../utils/claudeCloaking.js
 import { restoreToolNames } from "../utils/opencodeFingerprint.js";
 import { filterToOpenAIFormat } from "./formats/openai.js";
 import { normalizeThinkingConfig } from "../services/provider.js";
-import { applyThinking, captureThinking } from "./concerns/thinkingUnified.js";
+import { applyThinking, captureThinking, parseSuffix } from "./concerns/thinkingUnified.js";
 import { captureSessionId } from "../utils/sessionManager.js";
 import { ensureStreamToolCallIds } from "../utils/streamHelpers.js";
 import { AntigravityExecutor } from "../executors/antigravity.js";
 import { PROVIDERS } from "../providers/index.js";
 import { ROLE, GEMINI_ROLE } from "./schema/roles.js";
+import { isNewApiChat, applyNewApiThinking } from "../services/newapi/inference.js";
 
 // Registry for translators. Lazy-init guards against circular-import order:
 // translator modules call register() (side-effect) before this module's body runs.
@@ -71,6 +72,8 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   let result = body;
   // Role the client actually ended on, before any translator drops an emptied turn.
   const clientLastRole = detectClientLastRole(body);
+  const newApiChat = targetFormat === FORMATS.OPENAI && isNewApiChat(provider, credentials);
+  const newApiIntent = newApiChat ? { thinking: captureThinking(body), override: parseSuffix(model).override } : null;
 
   // Strip explicit content types (opt-in via strip[] in PROVIDER_MODELS entry)
   stripContentTypes(result, stripList);
@@ -91,7 +94,7 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
 
   // Capture thinking intent from the original (pre-translation) body, before any
   // format conversion strips/renames the fields. Applied after translation.
-  const thinkingIntent = captureThinking(result);
+  const thinkingIntent = newApiIntent?.thinking || captureThinking(result);
 
   // Capture session id from the original body (envelope still intact, e.g. antigravity request.sessionId)
   const clientSessionId = captureSessionId(result, credentials, connectionId, targetFormat);
@@ -104,7 +107,9 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
   const translationOptions = {
     preserveCacheControl: targetFormat === FORMATS.OPENAI && !!PROVIDERS[provider]?.quirks?.preserveCacheControl,
     provider,
-    preserveReasoning: provider === "codebuddy-intl",
+    // Two clients need assistant reasoning history kept: CodeBuddy Intl (IDE parity)
+    // and the dynamic New API family (reasoning round-trip through /chat/completions).
+    preserveReasoning: provider === "codebuddy-intl" || newApiChat,
   };
 
   // If same format, skip translation steps
@@ -145,6 +150,7 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
     (sourceFormat === FORMATS.OPENAI || sourceFormat === FORMATS.CLAUDE);
   if (!kiroThinkingMappedByTranslator) {
     applyThinking(targetFormat, model, result, provider, thinkingIntent);
+    if (newApiChat) applyNewApiThinking(result, newApiIntent);
   }
 
   // Always normalize to clean OpenAI format when target is OpenAI
