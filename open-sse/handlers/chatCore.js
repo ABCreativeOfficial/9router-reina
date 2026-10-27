@@ -7,6 +7,7 @@ import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/for
 import { createStreamController } from "../utils/streamHandler.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { createCodeBuddyContextState } from "../services/codebuddyContext.js";
+import { conversationKey } from "../utils/conversationHeaders.js";
 import { createRequestLogger } from "../utils/requestLogger.js";
 import { getModelTargetFormat, getModelSupportedFormats, getModelStrip, getModelUpstreamId, getModelType, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
 import { PROVIDERS } from "../config/providers.js";
@@ -223,7 +224,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Preserve source history before translators mutate nested messages; only the
   // CodeBuddy Intl request-local context reducer may consult it.
   const requestContext = provider === "codebuddy-intl"
-    ? { sourceBody: structuredClone(body), sourceFormat }
+    ? { sourceBody: structuredClone(body), sourceFormat,
+      codebuddyConversationKey: conversationKey({ credentials, body, scope: "codebuddy-intl" }),
+    }
     : null;
   if (requestContext) {
     requestContext.codebuddyContextState = createCodeBuddyContextState({
@@ -496,7 +499,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   let contextOverflow = false;
   let contextInputTokens = null;
   let contextLimit = null;
-  if (provider === "codebuddy-intl" && typeof executor.isContextOverflow === "function") {
+  if (!providerResponse.ok && provider === "codebuddy-intl" && typeof executor.isContextOverflow === "function") {
     try {
       const overflow = await executor.isContextOverflow(providerResponse.clone());
       if (overflow) {
