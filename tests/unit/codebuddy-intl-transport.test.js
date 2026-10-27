@@ -13,12 +13,92 @@ const { pipeWithDisconnect, createStreamController } = await import("../../open-
 const { checkFallbackError } = await import("../../open-sse/services/accountFallback.js");
 const { handleStreamingResponse } = await import("../../open-sse/handlers/chatCore/streamingHandler.js");
 const { handleComboChat } = await import("../../open-sse/services/combo.js");
+const { translateRequest } = await import("../../open-sse/translator/index.js");
+const { injectReasoningContent } = await import("../../open-sse/utils/reasoningContentInjector.js");
+const intlRegistry = (await import("../../open-sse/providers/registry/codebuddy-intl.js")).default;
 const encoder = new TextEncoder();
 const response = (text) => new Response(text, { headers: { "Content-Type": "text/event-stream" } });
 const credentials = { accessToken: "test-token" };
 afterEach(() => { net.fetch.mockReset(); resetConversationStore(); });
 
 describe("CodeBuddy IDE transport compatibility", () => {
+  it.each([...new Set([...intlRegistry.models.map(({ id }) => id), "kimi-k3", "unknown-model"])])
+  ("preserves real Claude reasoning and matches model header for Intl %s", async (model) => {
+    const source = { model: `${model}(max)`, temperature: 0.7, max_tokens: 8192,
+      system: "Keep all security instructions.", tools: [{ name: "read", input_schema: { type: "object", properties: { path: { type: "string" } } } }],
+      messages: [
+        { role: "user", content: "old" },
+        { role: "assistant", content: [{ type: "thinking", thinking: "real earlier reasoning", signature: "secret-signature" }, { type: "tool_use", id: "call_a", name: "read", input: { path: "file" } }] },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "call_a", content: "tool output" }] },
+        { role: "assistant", content: [{ type: "thinking", thinking: "reasoning-only turn" }] },
+        { role: "user", content: "continue" },
+      ] };
+    const translated = translateRequest("claude", "openai", `${model}(max)`, structuredClone(source), true, { ...credentials }, "codebuddy-intl");
+    translated.model = model;
+    net.fetch.mockResolvedValue(response("data: [DONE]\n\n"));
+    const result = await new CodeBuddyIntlExecutor().execute({ model: `${model}(max)`, body: translated, credentials });
+    const [, options] = net.fetch.mock.calls.at(-1);
+    const payload = JSON.parse(options.body);
+    expect(options.headers["X-Model-ID"]).toBe(model);
+    expect(payload.messages.find(m => m.tool_calls)?.reasoning_content).toBe("real earlier reasoning");
+    expect(payload.messages.find(m => m.reasoning_content === "reasoning-only turn")?.reasoning).toBe("reasoning-only turn");
+    expect(options.body).not.toContain("secret-signature");
+    expect(payload.temperature).toBe(0.7); // No unverified forced-temperature override.
+    expect(payload.tools[0].function.name).toBe("read");
+    await result.response.body.cancel();
+  });
+
+  it("preserves explicit model header override while using payload model by default", () => {
+    const headers = new CodeBuddyIntlExecutor().finalizeHeaders({ "x-model-id": "explicit-model" }, { credentials, body: { model: "actual" }, model: "actual(max)" });
+    expect(headers["x-model-id"]).toBe("explicit-model");
+  });
+
+  it("keeps non-Intl Claude translation and whitespace injection unchanged", () => {
+    const source = { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: [{ type: "thinking", thinking: "private reasoning" }, { type: "tool_use", id: "a", name: "read", input: {} }] },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "a", content: "result" }] }], tools: [{ name: "read", input_schema: { type: "object" } }] };
+    for (const provider of ["codebuddy-cn", "openai", "deepseek"]) {
+      const translated = translateRequest("claude", "openai", "kimi-k3", structuredClone(source), true, { ...credentials }, provider);
+      expect(JSON.stringify(translated)).not.toContain("private reasoning");
+      const injected = injectReasoningContent({ provider, model: "kimi-k3", body: translated });
+      expect(injected.messages.find(m => m.tool_calls).reasoning_content).toBe(" ");
+    }
+  });
+
+  it("keeps rejection diagnostics bounded and distinct from quota/restriction/context", () => {
+    const executor = new CodeBuddyIntlExecutor();
+    const parsed = executor.parseError({ status: 403 }, JSON.stringify({ code: "11133", msg: "account restricted prompt is too long quota exceeded", requestId: "a".repeat(500),
+      extError: { code: "400001", type: "invalid_request_error", param: "temperature", message: "secret-prompt", Request: "secret-token", Response: "secret-output" } }));
+    expect(parsed.status).toBe(400);
+    expect(parsed.message).toContain("param=temperature");
+    expect(parsed.message).not.toContain("secret");
+    expect(parsed.message).not.toContain("a".repeat(100));
+    expect(parsed.contextOverflow).toBeUndefined();
+    expect(checkFallbackError(403, parsed.message, 0, "codebuddy-intl")).toMatchObject({ shouldFallback: false, requestScoped: true, cooldownMs: 0 });
+    expect(executor.prepareError({ status: 500 }, JSON.stringify({ code: 11133 }))).toEqual({ terminalRequestError: true });
+  });
+
+  it.each(["reasoning", "reasoning_content"])("retains %s-only OpenAI history before alias repair", (alias) => {
+    for (const content of ["", []]) {
+      const body = { messages: [{ role: "user", content: "old" }, { role: "assistant", content, [alias]: "real history" }, { role: "user", content: "continue" }] };
+      const translated = translateRequest("openai", "openai", "glm-5.2", structuredClone(body), true, credentials, "codebuddy-intl");
+      const payload = new CodeBuddyIntlExecutor().transformRequest("glm-5.2", translated, true, credentials);
+      expect(payload.messages.find(m => m.role === "assistant")).toMatchObject({ reasoning: "real history", reasoning_content: "real history" });
+    }
+  });
+
+  it("does not reinterpret other providers' auth errors containing an Intl marker", () => {
+    const message = "codebuddy-intl model request rejected";
+    expect(checkFallbackError(401, message, 0, "openai").shouldFallback).toBe(true);
+    expect(checkFallbackError(401, message, 0, "codebuddy-cn").shouldFallback).toBe(true);
+  });
+
+  it("uses IDE empty reasoning fields only under evidenced backfill conditions", () => {
+    for (const model of ["kimi-k3", "deepseek-v4.1-flash", "mimo-v2.6-flash"]) {
+      expect(normalizeCodeBuddyPayload({ messages: [{ role: "assistant", content: "past" }] }, model).messages[0]).toMatchObject({ reasoning: "", reasoning_content: "" });
+    }
+    expect(normalizeCodeBuddyPayload({ messages: [{ role: "assistant", content: "past" }] }, "glm-5.2").messages[0]).not.toHaveProperty("reasoning_content");
+    expect(injectReasoningContent({ provider: "codebuddy-intl", model: "kimi-k3", body: { messages: [{ role: "assistant", tool_calls: [{ id: "a" }] }] } }).messages[0]).not.toHaveProperty("reasoning_content");
+  });
   it("mirrors actual reasoning, preserves conflicts, tools and media without mutating input", () => {
     const body = { reasoning_effort: "high", reasoningEffort: "low", messages: [
       { role: "assistant", content: null, reasoning: "real reasoning", tool_calls: [{ id: "call_a", function: { name: "read", arguments: "{}" } }] },
@@ -31,7 +111,8 @@ describe("CodeBuddy IDE transport compatibility", () => {
     const out = normalizeCodeBuddyPayload(body);
     expect(out.messages[0].reasoning_content).toBe("real reasoning");
     expect(out.messages[1]).toEqual(body.messages[1]);
-    expect(out.messages[2]).not.toHaveProperty("reasoning_content");
+    // IDE backfills empty aliases when thinking is enabled and history has real reasoning.
+    expect(out.messages[2]).toMatchObject({ reasoning: "", reasoning_content: "" });
     expect(out.messages.slice(3)).toEqual(body.messages.slice(3));
     expect(out).not.toHaveProperty("reasoningEffort");
     expect(body).toEqual(before);

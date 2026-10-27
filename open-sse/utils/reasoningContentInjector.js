@@ -68,6 +68,8 @@ function applyDeepSeekV4ProAlias({ provider, model, body }) {
 }
 
 export function injectReasoningContent({ provider, model, body }) {
+  // Intl uses its IDE's empty-field contract; never invent a whitespace reasoning trace.
+  if (provider === "codebuddy-intl") return body;
   const providerRule = providerRuleFor(provider);
   const modelRule = MODEL_RULES.find(r => r.match(model));
   const rule = providerRule || modelRule;
