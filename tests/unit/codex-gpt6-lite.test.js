@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CodexExecutor } from "../../open-sse/executors/codex.js";
-import { getModelsByProviderId } from "../../open-sse/config/providerModels.js";
+import { getModelsByProviderId, getModelUpstreamId } from "../../open-sse/config/providerModels.js";
 import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
 import { getPricingForModel } from "../../open-sse/providers/pricing.js";
 import { getThinkingLevels } from "../../open-sse/providers/thinkingLevels.js";
@@ -21,6 +21,7 @@ afterEach(() => vi.restoreAllMocks());
 // thinking for; the executor clamps them to the lowest supported effort.
 const LITE_LEVELS = {
   "gpt-6.1-sol": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
+  "gpt-6.1-terra": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
   "gpt-6-sol": ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"],
   "gpt-6-luna": ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
 };
@@ -44,7 +45,9 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
   it("lists gpt-6.1-terra as a Lite model with its 500k Codex window", () => {
     const entry = getModelsByProviderId("codex").find((item) => item.id === "gpt-6.1-terra");
     expect(entry?.responsesLite).toBe(true);
-    expect(entry?.thinkingLevels).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    // Levels come from the shared capability map, not a per-entry copy.
+    expect(entry?.thinkingLevels).toBeUndefined();
+    expect(getThinkingLevels("codex", "gpt-6.1-terra")).toEqual(LITE_LEVELS["gpt-6.1-terra"]);
     expect(getCapabilitiesForModel("codex", "gpt-6.1-terra")).toMatchObject({
       vision: true,
       reasoning: true,
@@ -56,6 +59,20 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     expect(getPricingForModel("codex", "gpt-6.1-terra")).toMatchObject({ input: 1, cached: 0.05, cache_creation: 1.25, output: 5 });
   });
 
+  it("keeps Terra extended-context aliases on the Lite lane", () => {
+    const entry = getModelsByProviderId("codex").find((item) => item.id === "gpt-6.1-terra[1m]");
+    expect(entry).toMatchObject({ responsesLite: true, upstreamModelId: "gpt-6.1-terra", contextLength: 872000 });
+    expect(getCapabilitiesForModel("codex", entry.id).contextWindow).toBe(872000);
+    const executor = new CodexExecutor();
+    // chatCore resolves registry aliases before the executor receives the body.
+    const upstreamModel = getModelUpstreamId("cx", entry.id);
+    expect(upstreamModel).toBe("gpt-6.1-terra");
+    const body = executor.transformRequest(entry.id, { model: upstreamModel, input: "hello" }, true, credentials);
+    expect(body.model).toBe("gpt-6.1-terra");
+    expect(body.reasoning).toEqual({ effort: "low", context: "all_turns" });
+    expect(executor.buildHeaders(credentials, true, null, entry.id)["x-openai-internal-codex-responses-lite"]).toBe("true");
+  });
+
   it("sends gpt-6.1-terra with the Lite header and shape", () => {
     const executor = new CodexExecutor();
     const body = executor.transformRequest("gpt-6.1-terra", {
@@ -64,7 +81,9 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     const headers = executor.buildHeaders(credentials, true, null, "gpt-6.1-terra");
 
     expect(headers["x-openai-internal-codex-responses-lite"]).toBe("true");
-    expect(body.reasoning).toEqual({ effort: "max", context: "all_turns" });
+    // The catalog lists `ultra` for terra, so it is forwarded verbatim rather
+    // than clamped — the clamping path only catches levels the model lacks.
+    expect(body.reasoning).toEqual({ effort: "ultra", context: "all_turns" });
   });
 
   it("uses official OpenAI Standard pricing for GPT-6", () => {

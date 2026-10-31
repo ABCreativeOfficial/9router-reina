@@ -1,5 +1,10 @@
 # v0.5.112 (2026-10-28)
 
+## Fixes (fork: upstream compatibility)
+- **Codex**: retain GPT-6.1 Terra through the shared capability catalog, including its low default, ultra/Fast aliases, Responses Lite transport, 500k default context and 872k extended-context variant.
+- **CodeBuddy Intl**: keep conversation and trace headers owned by the custom executor so the new generic CN hook cannot replace stable sessions or captured ID shapes.
+- **Thinking**: preserve the thinking-off marker through the OpenAI pivot for always-on Claude models without suppressing explicitly requested low-effort thinking text.
+
 ## Features
 - **MiniMax Code**: add lease auth mode that rides the desktop app's sign-in through a named-pipe/unix-socket broker (length-prefixed JSON protocol, broker-owned token refresh — no refresh token held locally since MiniMax tokens are single-use), with a dashboard lease button and usage attribution
 - **Nace Drex**: add the `nace` provider to the System One lane with `drex`, `drex-v2.0` and `drex-max`

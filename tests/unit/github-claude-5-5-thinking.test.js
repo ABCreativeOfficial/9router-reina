@@ -74,6 +74,18 @@ describe("GitHub Copilot /v1/messages request shape for Claude 5.5", () => {
     expect(out.output_config).toEqual({ effort: "low" });
   });
 
+  it("Opus 5.5: the OpenAI pivot retains the thinking-off marker", () => {
+    const out = translateRequest(FORMATS.CLAUDE, FORMATS.OPENAI, "claude-opus-5.5", structuredClone(classifierRequest), false, null, "github");
+    expect(out.reasoning_effort).toBe("minimal");
+    expect(out.thinking).toBeUndefined();
+  });
+
+  it("Opus 5.5: explicit low thinking keeps the requested display", () => {
+    const out = viaGithub("claude-opus-5.5", { ...mainLoopRequest, output_config: { effort: "low" } });
+    expect(out.thinking).toEqual({ type: "adaptive", display: "summarized" });
+    expect(out.output_config).toEqual({ effort: "low" });
+  });
+
   it("Opus 5.5: the main agent loop keeps adaptive thinking, display and effort", () => {
     const out = viaGithub("claude-opus-5.5", mainLoopRequest);
     expect(out.thinking).toEqual({ type: "adaptive", display: "summarized" });

@@ -281,7 +281,10 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "")
     case "openai": {
       if (none && canDisable) { body.reasoning_effort = "none"; break; }
       const level = toLevel(eff);
-      if (level) body.reasoning_effort = normalizeOpenAILevel(level, supportedLevels);
+      // Preserve off intent through the OpenAI pivot for always-on Claude.
+      // The native second hop distinguishes minimal from explicit low thinking.
+      if (none && caps.thinkingFormat === "claude-adaptive") body.reasoning_effort = "minimal";
+      else if (level) body.reasoning_effort = normalizeOpenAILevel(level, supportedLevels);
       break;
     }
     case "openai-responses": {

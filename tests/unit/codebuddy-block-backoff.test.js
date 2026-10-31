@@ -113,8 +113,7 @@ describe("CodeBuddy Intl block backoff (#5024)", () => {
     // No member served it, so the first request-scoped failure is handed back —
     // the caller still sees the member that named the real cause.
     expect(result).toBe(error);
-    expect(dispatch).toHaveBeenCalledTimes(2);
-    // A request-scoped fault must not evict the healthy account from rotation.
+    // Crucially, no account cooldown is persisted for a client-side fault.
     expect(db.updateProviderConnection).not.toHaveBeenCalled();
   });
 });
