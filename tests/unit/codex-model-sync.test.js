@@ -45,6 +45,7 @@ describe("Codex public catalog matches the official visible list", () => {
   it("exposes exactly the official visible chat models", () => {
     expect(CODEX_PUBLIC_MODEL_IDS).toEqual([
       "gpt-6.1-sol",
+      "gpt-6.1-terra",
       "gpt-6-astra",
       "gpt-6-sol",
       "gpt-6-luna",
@@ -59,6 +60,7 @@ describe("Codex public catalog matches the official visible list", () => {
 
   it("carries the official reasoning sets, including the models that stop early", () => {
     expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-sol"].reasoning).toContain("ultra");
+    expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-terra"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-sol"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-astra"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-luna"].reasoning).not.toContain("ultra");
@@ -67,6 +69,7 @@ describe("Codex public catalog matches the official visible list", () => {
 
   it("carries the official per-model default reasoning", () => {
     expect(getCodexDefaultReasoning("gpt-6.1-sol")).toBe("low");
+    expect(getCodexDefaultReasoning("gpt-6.1-terra")).toBe("low");
     expect(getCodexDefaultReasoning("gpt-6-astra")).toBe("low");
     expect(getCodexDefaultReasoning("gpt-6-sol")).toBe("medium");
     expect(getCodexDefaultReasoning("gpt-6-luna")).toBe("medium");
@@ -75,6 +78,7 @@ describe("Codex public catalog matches the official visible list", () => {
     expect(getCodexDefaultReasoning("gpt-5.6-luna")).toBe("medium");
     // 872k max context in the official entry → the [1m] variant is generated.
     expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-sol"].extendedContext).toBe(true);
+    expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-terra"].extendedContext).toBe(true);
     expect(CODEX_MODEL_CAPABILITIES["gpt-daybreak-blue-latest"].extendedContext).toBe(true);
   });
 
@@ -190,6 +194,7 @@ describe("virtual alias grammar", () => {
 
 describe("Codex outbound wire body", () => {
   const matrix = [
+    ["gpt-6.1-terra-ultra-(fast)", "gpt-6.1-terra", "ultra"],
     ["gpt-6-astra-ultra-(fast)", "gpt-6-astra", "ultra"],
     ["gpt-6-sol-ultra-(fast)", "gpt-6-sol", "ultra"],
     ["gpt-6-luna-max-(fast)", "gpt-6-luna", "max"],
@@ -208,6 +213,7 @@ describe("Codex outbound wire body", () => {
 
   it("applies the official default reasoning to a canonical model", () => {
     const matrix = [
+      ["gpt-6.1-terra", "low"],
       ["gpt-6-astra", "low"],
       ["gpt-6-sol", "medium"],
       ["gpt-6-luna", "medium"],

@@ -21,12 +21,16 @@ function buildHeaders(id) {
 }
 
 describe("codebuddy channel headers", () => {
+  it("registers the generic codebuddyHeaders hook for CN", () => {
+    expect(PROVIDERS["codebuddy-cn"]?.auth?.hooks).toContain("codebuddyHeaders");
+  });
+
+  it("leaves Intl header generation to its custom executor", () => {
+    expect(PROVIDERS["codebuddy-intl"]?.auth?.hooks ?? []).not.toContain("codebuddyHeaders");
+  });
+
   for (const id of ["codebuddy-intl", "codebuddy-cn"]) {
     describe(id, () => {
-      it("registers the codebuddyHeaders hook", () => {
-        expect(PROVIDERS[id]?.auth?.hooks).toContain("codebuddyHeaders");
-      });
-
       it("sends the plugin request/conversation ids", () => {
         const headers = buildHeaders(id);
         for (const key of REQUIRED) {
@@ -41,7 +45,7 @@ describe("codebuddy channel headers", () => {
         expect(headers["X-Conversation-ID"]).not.toBe(headers["X-Conversation-Message-ID"]);
       });
 
-      it("still applies the bearer token after the hook runs", () => {
+      it("still applies the bearer token", () => {
         expect(buildHeaders(id).Authorization).toBe("Bearer TESTTOKEN");
       });
 
