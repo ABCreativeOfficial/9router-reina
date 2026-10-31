@@ -37,9 +37,7 @@ export default {
       combined: true,
       header: "Authorization",
       scheme: "bearer",
-      // Channel check requires the plugin's request/conversation ids — without
-      // them upstream rejects with 400 / 11128 "request illegal".
-      hooks: ["codebuddyHeaders"],
+      // CodeBuddyIntlExecutor owns session-stable conversation and trace headers.
     },
     // Intl billing endpoint mirrors CN shape (data.Response.Data.Accounts[]).
     usage: {

@@ -54,6 +54,20 @@ export const CODEX_MODEL_CAPABILITIES = {
     maxOutput: 128000,
     vision: true,
   },
+  "gpt-6.1-terra": {
+    name: "GPT 6.1 Terra",
+    displayName: "GPT-6.1-Terra",
+    // Official catalog: 500k default context, 872k extended context, and
+    // reasoning through `ultra`. Registry aliases derive from this entry.
+    defaultReasoning: "low",
+    reasoning: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    fast: true,
+    responsesLite: true,
+    extendedContext: true,
+    contextWindow: 500000,
+    maxOutput: 128000,
+    vision: true,
+  },
   "gpt-6-astra": {
     name: "GPT 6 Astra",
     displayName: "GPT-6-Astra",
