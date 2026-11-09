@@ -1,5 +1,11 @@
 # v0.5.116 (2026-11-08)
 
+## Fixes (fork: upstream compatibility)
+- **Translator options bag**: one `translationOptions` object now carries `preserveCacheControl`, the resolved `provider`, and the reasoning-history flag to every translator call and to `filterToOpenAIFormat`. Claude-to-OpenAI derives `preserveReasoning` from that same bag, so upstream's cache-control work and the custom Intl/New API reasoning retention share one contract instead of two parallel argument lists.
+- **CodeBuddy Intl system prompt**: keep the client's system prompt and neutralize only the measured leading identity sentence. The trigger stays pinned to the comma plus `Anthropic's official CLI` form (the words after `CLI` vary by client), so prompts the gateway accepts are never rewritten.
+- **DeepSeek thinking**: accept an explicit `budget_tokens` on compatible nodes while keeping declared-level fitting for the effort field, instead of the older blanket low/medium-to-high collapse.
+- **Executor retries**: keep the custom terminal-error gate ahead of generic retries and, on a 502 retry, force a fresh socket instead of replaying a poisoned keep-alive one.
+
 ## Features
 - **CommandCode**: align data bridge with official CLI v1.88.5 and add credential auto-import
 - **Antigravity**: track and display a separate Gemini 4 Argon weekly/session quota
