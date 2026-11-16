@@ -1,5 +1,12 @@
 # v0.5.119 (2026-11-11)
 
+## Fixes (fork: upstream compatibility)
+- **Translator call contract**: one `translationOptions` bag carries `preserveCacheControl`, the resolved `provider` and the reasoning-history flag to every translator and to `filterToOpenAIFormat`. Claude-to-OpenAI derives `preserveReasoning` from that bag, so upstream's cache-control work and the custom Intl/New API reasoning retention share one contract.
+- **Codex catalog identity**: the shared capability catalog is the single source for the CLI version, model set, alias grammar and Lite/extended-context markers. Upstream's local consts and its `withCodexReviewModels` import are gone from the registry so the two cannot drift; `gpt-6.1-terra` and the 872k variant come from the table.
+- **Account fallback flags**: keep upstream's `modelScoped` (NVIDIA "degraded" locks one model) alongside the custom `accountScoped` (CodeBuddy 11140 freezes the account). Both belong on the same rule result.
+- **New API live catalogs**: the family marker (`NEW_API_FAMILY`) decides membership, never a provider id, and it composes with upstream's live-catalog set (cursor, zed, claude, commandcode) in one gate.
+- **Baselines**: regenerated from the runtime with the snapshot scripts after the provider-set changes; never hand-merged.
+
 ## Features
 - **Synthetic**: add Synthetic (`syn`) — OpenAI-compatible upstream on `api.synthetic.new` with the always-on `hf:` models as a static fallback, model passthrough, live model discovery, and a usage tracker reading `GET /v2/quotas`
 - **Claude**: add Claude Fable 5.2 ($8/$40) as the Fable flagship and `claude-haiku-5-5` ($0.10/$0.50, 1M/128K); the advertised Claude Code version now auto-tracks the latest npm release (floor 2.1.322, pin with `CLAUDE_CLI_VERSION`), and the dashboard lists live models through the OAuth bearer
