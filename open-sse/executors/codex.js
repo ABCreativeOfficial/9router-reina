@@ -102,6 +102,9 @@ function normalizeCodexTools(body) {
         for (const st of tool.tools) {
           const n = typeof st?.name === "string" ? st.name.trim().slice(0, 128) : "";
           if (n) validNames.add(n);
+          // Codex Responses expects an explicit boolean. Claude Code tools do
+          // not declare strictness, so preserve their non-strict semantics.
+          if (st?.type === "function" && typeof st.strict !== "boolean") st.strict = false;
           if (st?.parameters && typeof st.parameters === "object") {
             st.parameters = stripCodexUnsupportedPatterns(st.parameters, patternStats);
           }
@@ -128,7 +131,10 @@ function normalizeCodexTools(body) {
     tool.name = name.slice(0, 128);
     if (description) tool.description = description;
     tool.parameters = stripCodexUnsupportedPatterns(parameters, patternStats);
-    if (typeof strict === "boolean") tool.strict = strict;
+    // Anthropic/Chat Completions tools are non-strict by default. Without an
+    // explicit false, Codex may try to compile unsupported strict keywords
+    // (e.g. "not" in a Claude Code tool schema) and reject the entire request.
+    tool.strict = typeof strict === "boolean" ? strict : false;
     validNames.add(name);
     return true;
   });
