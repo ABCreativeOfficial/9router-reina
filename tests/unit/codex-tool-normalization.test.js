@@ -93,8 +93,12 @@ describe("CodexExecutor tool normalization", () => {
       providerSpecificData: {},
     });
 
-    expect(responses.tools).toHaveLength(1);
-    expect(responses.tools[0]).toMatchObject({
+    // GPT-6.2 Sol uses Responses Lite: function tools live in the developer
+    // additional_tools prefix, and the top-level tools field is intentionally null.
+    expect(responses.tools).toBeNull();
+    const liteTools = responses.input.find((item) => item.type === "additional_tools").tools;
+    expect(liteTools).toHaveLength(1);
+    expect(liteTools[0]).toMatchObject({
       type: "function",
       name: "search",
       strict: false,

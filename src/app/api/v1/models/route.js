@@ -22,6 +22,7 @@ import { isNewApiConnection } from "open-sse/services/newapi/definition.js";
 import { resolveNewApiConnectionModels } from "@/sse/services/newApiModels";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveCommandCodeModels } from "open-sse/services/commandcodeModels.js";
+import { resolveCodexLiveModels } from "open-sse/services/codexModelDiscovery.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel, aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
@@ -107,6 +108,9 @@ const LIVE_MODEL_RESOLVERS = {
     } catch {
       return null;
     }
+  codex: async (conn) => {
+    const result = await resolveCodexLiveModels(conn);
+    return result.models.length ? { models: result.models } : null;
   },
   kiro: async (conn) => {
     const result = await resolveKiroModels({
@@ -589,13 +593,30 @@ export async function buildModelsList(kindFilter, options = {}) {
                 })
               )
             : !hasExplicitEnabledModels
-              ? [(await liveResolver(conn))?.models || []]
+              ? providerId === "codex"
+                ? await Promise.all(
+                    (activeConnectionsByProvider.get(providerId) || [conn]).map(async (candidate) => {
+                      const live = await liveResolver(candidate);
+                      return live?.models?.filter((model) =>
+                        model?.id && isConnectionEligibleForModel(candidate, model.id)
+                      ) || [];
+                    })
+                  )
+                : [(await liveResolver(conn))?.models || []]
               : [];
           const liveModels = Array.from(
             new Map(liveResults.flat().filter((m) => m?.id).map((m) => [m.id, m])).values()
           );
           if (liveModels.length) {
-            rawModelIds = liveModels.map((m) => m.id);
+            // Codex /models describes chat models; its image and transcription
+            // endpoints have separate static entries. Keep those available when
+            // the live LLM catalog replaces the stale chat snapshot.
+            const codexMedia = providerId === "codex"
+              ? providerModels.filter((model) => modelKind(model) !== LLM_KIND)
+              : [];
+            rawModelIds = [...new Set([
+              ...liveModels.map((m) => m.id), ...codexMedia.map((m) => m.id),
+            ])];
             liveModelKindById = new Map(liveModels.map((m) => [m.id, modelKind(m)]));
             liveCapabilitiesById = new Map(
               liveModels.filter((m) => m.capabilities).map((m) => [m.id, m.capabilities])

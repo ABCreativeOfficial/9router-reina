@@ -139,7 +139,7 @@ export function getThinkingLevels(provider, model) {
   // any family pattern; the alias prefix ("cx/") and a "(level)" suffix are stripped first.
   if (normalizedProvider === "codex") {
     const codexMatch = matchCodexBaseModel(
-      typeof model === "string" ? model.replace(/\([^()]+\)\s*$/, "").trim() : model
+      typeof model === "string" ? model.replace(/\([^()]+\)\s*$/, "").replace(/\[1m\]$/, "").trim() : model
     );
     const codexCaps = codexMatch ? getCodexModelCapabilities(codexMatch.base) : null;
     if (codexCaps) return ["none", "minimal", ...codexCaps.reasoning];

@@ -44,6 +44,8 @@ function outbound(model, extraBody = {}) {
 describe("Codex public catalog matches the official visible list", () => {
   it("exposes exactly the official visible chat models", () => {
     expect(CODEX_PUBLIC_MODEL_IDS).toEqual([
+      "gpt-6.2-sol",
+      "gpt-6.2-astra",
       "gpt-6.1-sol",
       "gpt-6.1-terra",
       "gpt-6-astra",
@@ -59,6 +61,8 @@ describe("Codex public catalog matches the official visible list", () => {
   });
 
   it("carries the official reasoning sets, including the models that stop early", () => {
+    expect(CODEX_MODEL_CAPABILITIES["gpt-6.2-sol"].reasoning).toContain("ultra");
+    expect(CODEX_MODEL_CAPABILITIES["gpt-6.2-astra"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-sol"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6.1-terra"].reasoning).toContain("ultra");
     expect(CODEX_MODEL_CAPABILITIES["gpt-6-sol"].reasoning).toContain("ultra");
@@ -68,6 +72,8 @@ describe("Codex public catalog matches the official visible list", () => {
   });
 
   it("carries the official per-model default reasoning", () => {
+    expect(getCodexDefaultReasoning("gpt-6.2-sol")).toBe("low");
+    expect(getCodexDefaultReasoning("gpt-6.2-astra")).toBe("low");
     expect(getCodexDefaultReasoning("gpt-6.1-sol")).toBe("low");
     expect(getCodexDefaultReasoning("gpt-6.1-terra")).toBe("low");
     expect(getCodexDefaultReasoning("gpt-6-astra")).toBe("low");
@@ -213,6 +219,8 @@ describe("Codex outbound wire body", () => {
 
   it("applies the official default reasoning to a canonical model", () => {
     const matrix = [
+      ["gpt-6.2-sol", "low"],
+      ["gpt-6.2-astra", "low"],
       ["gpt-6.1-terra", "low"],
       ["gpt-6-astra", "low"],
       ["gpt-6-sol", "medium"],
@@ -239,6 +247,29 @@ describe("Codex outbound wire body", () => {
     const body = outbound("gpt-6-sol-ultra", { reasoning_effort: "low" });
     expect(body.model).toBe("gpt-6-sol");
     expect(body.reasoning.effort).toBe("low");
+  });
+
+  it.each(["high", "xhigh"])("ignores adaptive auto for GPT-6.2 Sol %s aliases", (level) => {
+    const model = `gpt-6.2-sol-${level}`;
+    for (const body of [{ reasoning_effort: "auto" }, { reasoning: { effort: "auto", summary: "auto" } }]) {
+      const wire = outbound(model, body);
+      expect(wire.model).toBe("gpt-6.2-sol");
+      expect(wire.reasoning.effort).toBe(level);
+      expect(wire.reasoning.context).toBe("all_turns");
+    }
+  });
+
+  it("uses catalog defaults for auto on a bare Codex model", () => {
+    expect(outbound("gpt-6.2-sol", { reasoning: { effort: "auto" } }).reasoning.effort).toBe("low");
+    expect(outbound("gpt-6-sol", { reasoning_effort: "auto" }).reasoning.effort).toBe("medium");
+  });
+
+  it("preserves explicit reasoning.effort priority and valid summary auto", () => {
+    const wire = outbound("gpt-6.2-sol-xhigh", {
+      reasoning: { effort: "high", summary: "auto" }, reasoning_effort: "low",
+    });
+    expect(wire.reasoning.effort).toBe("high");
+    expect(wire.reasoning.summary).toBe("auto");
   });
 
   it("rejects an unsupported combination at the executor", () => {

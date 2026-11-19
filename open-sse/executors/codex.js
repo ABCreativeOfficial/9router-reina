@@ -14,6 +14,7 @@ import { DEFAULT_RETRY_CONFIG, HTTP_STATUS, resolveRetryEntry } from "../config/
 import { dbg } from "../utils/debugLog.js";
 import { resolveSessionId } from "../utils/sessionManager.js";
 import { stripCodexUnsupportedPatterns } from "../utils/codexToolSchema.js";
+import { resolveCodexLiveModels } from "../services/codexModelDiscovery.js";
 
 // SSE error patterns inside 200-OK bodies. Some retry same account first; capacity rotates accounts.
 const CODEX_SSE_RETRY_PATTERNS = ["server_is_overloaded", "service_unavailable_error"];
@@ -311,6 +312,13 @@ export class CodexExecutor extends BaseExecutor {
   }
 
   async execute(args) {
+    // The upstream account catalog can introduce models after this build.
+    // Refresh unknown ids before transformRequest decides Lite and aliases.
+    // Known models use the registry already refreshed by /v1/models, avoiding
+    // an extra HTTP request on every normal inference call.
+    if (parseCodexModelReference(args.body?.model || args.model).unknown) {
+      await resolveCodexLiveModels(args.credentials, { proxyOptions: args.proxyOptions });
+    }
     const imgCount = Array.isArray(args.body?.input) ? args.body.input.reduce((n, it) => n + (Array.isArray(it.content) ? it.content.filter(c => c.type === "image_url").length : 0), 0) : 0;
     const inputLen = Array.isArray(args.body?.input) ? args.body.input.length : 0;
     dbg("CODEX", `execute start | inputItems=${inputLen} | images=${imgCount} | sessionId=${this._currentSessionId || "pending"}`);
@@ -560,17 +568,19 @@ export class CodexExecutor extends BaseExecutor {
     // every model without an explicit override run at that one level, which does
     // not match the official catalog's per-model default_reasoning_level.
     const codexDefaultEffort = getCodexDefaultReasoning(body.model);
+    // Claude adaptive thinking uses "auto" as an instruction to choose a
+    // level. Codex reasoning.effort rejects that literal, so treat it as unset.
+    // Do not touch reasoning.summary/context, where "auto" is valid.
+    const requestedEffort = [body.reasoning?.effort, body.reasoning_effort]
+      .find((value) => typeof value === "string" && value !== "auto" && value.length > 0);
+    const effort = normalizeReasoningEffort(
+      body.model,
+      requestedEffort || modelEffort || codexDefaultEffort || (responsesLite ? 'medium' : 'low')
+    );
     if (!body.reasoning) {
-      const effort = normalizeReasoningEffort(
-        body.model,
-        body.reasoning_effort || modelEffort || codexDefaultEffort || (responsesLite ? 'medium' : 'low')
-      );
       body.reasoning = responsesLite ? { effort } : { effort, summary: "auto" };
     } else {
-      body.reasoning.effort = normalizeReasoningEffort(
-        body.model,
-        body.reasoning.effort || modelEffort || codexDefaultEffort
-      );
+      body.reasoning.effort = effort;
       if (!responsesLite && !body.reasoning.summary) body.reasoning.summary = "auto";
     }
     if (responsesLite) body.reasoning.context = "all_turns";

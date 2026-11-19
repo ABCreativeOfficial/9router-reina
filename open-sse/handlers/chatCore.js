@@ -88,9 +88,11 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // default. Handled in the Codex executor, which is the only stage that owns
   // the Responses-API reasoning shape.
   if (codexAlias?.reasoningEffort && body && typeof body === "object"
-    && body.reasoning_effort === undefined
-    && !(body.reasoning && typeof body.reasoning === "object" && body.reasoning.effort !== undefined)) {
+    && (body.reasoning_effort === undefined || body.reasoning_effort === "auto")
+    && !(body.reasoning && typeof body.reasoning === "object"
+      && body.reasoning.effort !== undefined && body.reasoning.effort !== "auto")) {
     body.reasoning_effort = codexAlias.reasoningEffort;
+    if (body.reasoning?.effort === "auto") body.reasoning.effort = codexAlias.reasoningEffort;
   }
   // Stable per-session color so all lines of one CLI conversation share a tag
   const sessionSeed = (() => {
