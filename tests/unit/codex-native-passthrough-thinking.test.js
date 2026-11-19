@@ -118,4 +118,13 @@ describe("native Codex passthrough thinking suffixes", () => {
     expect(body.model).toBe("gpt-5.6-terra");
     expect(body.reasoning).toEqual({ effort: "low" });
   });
+
+  it.each(["high", "xhigh"])("uses %s alias instead of adaptive auto in chatCore", async (level) => {
+    const body = await runNativeCodexRequest(`gpt-6.2-sol-${level}`, {
+      effort: "auto", summary: "auto",
+    });
+    expect(body.model).toBe("gpt-6.2-sol");
+    expect(body.reasoning.effort).toBe(level);
+    expect(body.reasoning.summary).toBe("auto");
+  });
 });

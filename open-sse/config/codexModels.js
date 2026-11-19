@@ -18,8 +18,8 @@
  *   body.reasoning.effort     = explicit effort, else the model's default
  *   body.service_tier         = "priority" when Fast is selected (ServiceTier::Fast.request_value())
  *
- * Keep this table in sync when the official catalog changes: the drift test in
- * tests/unit/codex-model-sync.test.js pins the public ids and their reasoning sets.
+ * This bundled table is the offline fallback. The live Codex catalog augments
+ * it at runtime, so newly published models need no manual registry edits.
  */
 
 /** Official catalog snapshot used for this table. */
@@ -42,6 +42,30 @@ export const CODEX_EXTENDED_CONTEXT_WINDOW = 872000;
  * `extendedContext` marks a model the backend also serves as `<id>[1m]`.
  */
 export const CODEX_MODEL_CAPABILITIES = {
+  "gpt-6.2-sol": {
+    name: "GPT 6.2 Sol",
+    displayName: "GPT-6.2-Sol",
+    defaultReasoning: "low",
+    reasoning: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    fast: true,
+    responsesLite: true,
+    extendedContext: true,
+    contextWindow: 500000,
+    maxOutput: 128000,
+    vision: true,
+  },
+  "gpt-6.2-astra": {
+    name: "GPT 6.2 Astra",
+    displayName: "GPT-6.2-Astra",
+    defaultReasoning: "low",
+    reasoning: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    fast: true,
+    responsesLite: true,
+    extendedContext: true,
+    contextWindow: 272000,
+    maxOutput: 128000,
+    vision: true,
+  },
   "gpt-6.1-sol": {
     name: "GPT 6.1 Sol",
     displayName: "GPT-6.1-Sol",
@@ -191,6 +215,38 @@ export const CODEX_KNOWN_MODEL_IDS = [
   ...CODEX_PUBLIC_MODEL_IDS,
   ...Object.keys(CODEX_INTERNAL_MODEL_CAPABILITIES),
 ];
+
+/** Build canonical + virtual aliases from one capability entry. */
+export function buildCodexChatModelEntries(base, caps) {
+  const lite = caps.responsesLite ? { responsesLite: true } : {};
+  const entries = [{ id: base, name: caps.name, contextLength: caps.contextWindow, ...lite }];
+  if (caps.extendedContext) {
+    entries.push({
+      id: `${base}[1m]`, name: `${caps.name} (extended context)`,
+      upstreamModelId: base, contextLength: CODEX_EXTENDED_CONTEXT_WINDOW, ...lite,
+    });
+  }
+  if (caps.fast) {
+    entries.push({
+      id: `${base}${CODEX_FAST_SUFFIX}`, name: `${caps.name} (Fast)`,
+      upstreamModelId: base, serviceTier: "fast", ...lite,
+    });
+  }
+  for (const effort of caps.reasoning) {
+    entries.push({
+      id: `${base}-${effort}`, name: `${caps.name} ${effort}`,
+      upstreamModelId: base, reasoningEffort: effort, ...lite,
+    });
+    if (caps.fast) {
+      entries.push({
+        id: `${base}-${effort}${CODEX_FAST_SUFFIX}`,
+        name: `${caps.name} ${effort} (Fast)`, upstreamModelId: base,
+        reasoningEffort: effort, serviceTier: "fast", ...lite,
+      });
+    }
+  }
+  return entries;
+}
 
 /** Capability entry for any known Codex model id, or null. */
 export function getCodexModelCapabilities(modelId) {

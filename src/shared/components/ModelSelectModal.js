@@ -30,7 +30,7 @@ const PROVIDER_ORDER = [
 // Runtime New API providers are NOT listed here — they resolve through the
 // shared /api/models/runtime source below, since their provider ids are
 // user-created and cannot be enumerated statically.
-const LIVE_CATALOG_PROVIDERS = ["cursor", "cline", "clinepass", "zed"];
+const LIVE_CATALOG_PROVIDERS = ["codex", "cursor", "cline", "clinepass", "zed"];
 
 // Fetch a provider's account-scoped catalog for every active connection and merge
 // the results. Entries collapse by model id on purpose: two connections of the
@@ -153,11 +153,13 @@ export default function ModelSelectModal({
     return map;
   }, [filteredActiveProviders]);
   const cursorConnectionIds = liveConnectionIdsByProvider.cursor;
+  const codexConnectionIds = liveConnectionIdsByProvider.codex;
   const clineConnectionIds = liveConnectionIdsByProvider.cline;
   const clinepassConnectionIds = liveConnectionIdsByProvider.clinepass;
   const zedConnectionIds = liveConnectionIdsByProvider.zed;
 
   const cursorModels = useLiveProviderModels(isOpen, cursorConnectionIds, "Cursor");
+  const codexModels = useLiveProviderModels(isOpen, codexConnectionIds, "Codex");
   const clineModels = useLiveProviderModels(isOpen, clineConnectionIds, "Cline");
   const clinepassModels = useLiveProviderModels(isOpen, clinepassConnectionIds, "ClinePass");
   const zedModels = useLiveProviderModels(isOpen, zedConnectionIds, "Zed");
@@ -443,9 +445,14 @@ export default function ModelSelectModal({
           };
         }
       } else {
-        const liveModels = providerId === "cursor" ? cursorModels : providerId === "cline" ? clineModels : providerId === "clinepass" ? clinepassModels : providerId === "zed" ? zedModels : [];
+        const liveModels = providerId === "codex" ? codexModels : providerId === "cursor" ? cursorModels : providerId === "cline" ? clineModels : providerId === "clinepass" ? clinepassModels : providerId === "zed" ? zedModels : [];
+        const codexMediaModels = providerId === "codex" && liveModels.length > 0
+          ? getModelsByProviderId(providerId).filter((model) =>
+              !model.internal && getModelKind(model) && getModelKind(model) !== "llm"
+            )
+          : [];
         const hardcodedModels = liveModels.length > 0
-          ? liveModels
+          ? [...liveModels, ...codexMediaModels]
           : getModelsByProviderId(providerId);
         const hardcodedIds = new Set(hardcodedModels.map((m) => m.id));
 
@@ -537,7 +544,7 @@ export default function ModelSelectModal({
     });
 
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, effectiveConnections, deactivatedProviderIds, cursorModels, clineModels, clinepassModels, zedModels, runtimeCatalog]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, kindFilter, effectiveConnections, deactivatedProviderIds, codexModels, cursorModels, clineModels, clinepassModels, zedModels, runtimeCatalog]);
 
   // Parse search query into structured query (regex, positive tokens, negative tokens)
   const parsedQuery = useMemo(() => parseSearchQuery(searchQuery), [searchQuery]);

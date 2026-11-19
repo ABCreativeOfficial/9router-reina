@@ -1,4 +1,5 @@
 // Model capabilities — what each model can read/do beyond plain text.
+import { CODEX_EXTENDED_CONTEXT_WINDOW, getCodexModelCapabilities, matchCodexBaseModel } from "../config/codexModels.js";
 //
 // Fallback order (first match wins), result merged over DEFAULT_CAPABILITIES:
 //   1. PROVIDER_CAPABILITIES[provider][model]  — provider-specific override
@@ -862,6 +863,25 @@ function isCommandCodeTextOnly(model) {
 }
 export function getCapabilitiesForModel(provider, model) {
   if (!model) return { ...DEFAULT_CAPABILITIES };
+
+  // Codex's live catalog is more precise than static family patterns, which
+  // otherwise overstate a newly released model's context as the public API's
+  // 1.05M window. Applies to canonical, virtual effort and [1m] variants.
+  if (provider === "codex" || provider === "cx") {
+    const cleaned = model.replace(/\([^()]+\)\s*$/, "");
+    const extended = cleaned.endsWith("[1m]");
+    const match = matchCodexBaseModel(extended ? cleaned.slice(0, -4) : cleaned);
+    const caps = match ? getCodexModelCapabilities(match.base) : null;
+    if (caps) return {
+      ...DEFAULT_CAPABILITIES,
+      vision: caps.vision,
+      reasoning: true,
+      search: true,
+      thinkingFormat: "openai",
+      contextWindow: extended && caps.extendedContext ? CODEX_EXTENDED_CONTEXT_WINDOW : caps.contextWindow,
+      maxOutput: caps.maxOutput,
+    };
+  }
 
   // Canonical exact lookup strips vendor prefix: "anthropic/claude-opus-4.7" -> "claude-opus-4.7".
   const baseModel = model.includes("/") ? model.split("/").pop() : model;

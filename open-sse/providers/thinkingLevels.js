@@ -128,7 +128,7 @@ export function getThinkingLevels(provider, model) {
   // instead of a broad family pattern that would flatten them together.
   if (provider === "codex") {
     const codexMatch = matchCodexBaseModel(
-      typeof model === "string" ? model.replace(/\([^()]+\)\s*$/, "").trim() : model
+      typeof model === "string" ? model.replace(/\([^()]+\)\s*$/, "").replace(/\[1m\]$/, "").trim() : model
     );
     const codexCaps = codexMatch ? getCodexModelCapabilities(codexMatch.base) : null;
     if (codexCaps) return ["none", "minimal", ...codexCaps.reasoning];

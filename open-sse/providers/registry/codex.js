@@ -5,8 +5,7 @@ import {
   CODEX_CLI_VERSION,
   CODEX_MODEL_CAPABILITIES,
   CODEX_INTERNAL_MODEL_CAPABILITIES,
-  CODEX_FAST_SUFFIX,
-  CODEX_EXTENDED_CONTEXT_WINDOW,
+  buildCodexChatModelEntries,
 } from "../../config/codexModels.js";
 
 export default {
@@ -62,44 +61,8 @@ export default {
     // reasoning picker and alias validation cannot drift. Virtual aliases
     // (`<base>-<effort>`, `<base>-(fast)`) are generated from the same map and
     // resolved back to the canonical slug by the Codex executor.
-    ...Object.entries(CODEX_MODEL_CAPABILITIES).flatMap(([base, caps]) => {
-      const canonical = {
-        id: base,
-        name: caps.name,
-        contextLength: caps.contextWindow,
-        // Consumed by the executor (isCodexResponsesLiteModel) to pick the
-        // Codex 0.155 wire shape; must be emitted or those models regress.
-        ...(caps.responsesLite ? { responsesLite: true } : {}),
-      };
-      const aliases = [];
-      // Extended-context variant: the official catalog serves the same weights
-      // with an 872k window under `<base>[1m]`, so it maps back to the base id.
-      if (caps.extendedContext) {
-        aliases.push({
-          id: `${base}[1m]`,
-          name: `${caps.name} (extended context)`,
-          upstreamModelId: base,
-          contextLength: CODEX_EXTENDED_CONTEXT_WINDOW,
-          ...(caps.responsesLite ? { responsesLite: true } : {}),
-        });
-      }
-      if (caps.fast) {
-        aliases.push({ id: `${base}${CODEX_FAST_SUFFIX}`, name: `${caps.name} (Fast)`, upstreamModelId: base, serviceTier: "fast" });
-      }
-      for (const effort of caps.reasoning) {
-        aliases.push({ id: `${base}-${effort}`, name: `${caps.name} ${effort}`, upstreamModelId: base, reasoningEffort: effort });
-        if (caps.fast) {
-          aliases.push({
-            id: `${base}-${effort}${CODEX_FAST_SUFFIX}`,
-            name: `${caps.name} ${effort} (Fast)`,
-            upstreamModelId: base,
-            reasoningEffort: effort,
-            serviceTier: "fast",
-          });
-        }
-      }
-      return [canonical, ...aliases];
-    }),
+    ...Object.entries(CODEX_MODEL_CAPABILITIES).flatMap(([base, caps]) =>
+      buildCodexChatModelEntries(base, caps)),
     // Official catalog entry with `visibility: "hide"` — kept routable because
     // Codex CLI sends the bare id for its automatic approval review, but never
     // part of a public model list (`internal: true` is filtered by the listing

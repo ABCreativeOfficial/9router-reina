@@ -16,16 +16,9 @@ import { resolveClineModels, resolveClinepassModels } from "open-sse/services/cl
 import { NOUS_MODELS_URL, normalizeNousModels } from "open-sse/services/nous.js";
 import { resolveCommandCodeModels } from "open-sse/services/commandcodeModels.js";
 import { resolveNewApiConnectionModels } from "@/sse/services/newApiModels";
-import { CODEX_CLI_VERSION } from "open-sse/config/codexModels.js";
+import { resolveCodexLiveModels } from "open-sse/services/codexModelDiscovery.js";
 
 const GEMINI_CLI_MODELS_URL = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
-
-// Model discovery must identify as the same Codex CLI version as inference.
-// Reading it off the registry transport keeps the two from drifting: the
-// /codex/models endpoint gates each entry by minimal_client_version, so a stale
-// client_version here comes back 200 with newer models quietly missing.
-const CODEX_CLIENT_VERSION = CODEX_CLI_VERSION;
-const CODEX_MODELS_URL = `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_CLIENT_VERSION}`;
 
 const parseOpenAIStyleModels = (data) => {
   if (Array.isArray(data)) return data;
@@ -59,12 +52,6 @@ const parseGeminiCliModels = (data) => {
 // ids are not official Codex models, so they are no longer generated or exposed;
 // the live list mirrors upstream as-is. `codex-auto-review` is a real (hidden)
 // official entry and comes back from the endpoint on its own.
-const parseCodexModels = (data) => parseOpenAIStyleModels(data).flatMap((model) => {
-  const id = model?.id || model?.slug || model?.model || model?.name;
-  if (!id) return [];
-  return [{ ...model, id, name: model?.display_name || model?.displayName || model?.name || id }];
-});
-
 const createOpenAIModelsConfig = (url) => ({
   url,
   method: "GET",
@@ -204,20 +191,27 @@ const PROVIDER_MODELS_CONFIG = {
     parseResponse: (data) => data.models || []
   },
   codex: {
-    customResolver: buildOAuthResolver({
-      refreshFn: (conn) => refreshCodexToken(conn.refreshToken),
-      fetchFn: (token) => fetch(CODEX_MODELS_URL, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${token}`,
-          "originator": "codex_cli_rs"
+    customResolver: async (connection) => {
+      let result = await resolveCodexLiveModels(connection, { forceRefresh: true });
+      if (!result.models.length && [401, 403].includes(result.status) && connection.refreshToken) {
+        const refreshed = await refreshCodexToken(connection.refreshToken);
+        if (refreshed?.accessToken) {
+          await updateProviderCredentials(connection.id, {
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken || connection.refreshToken,
+            expiresIn: refreshed.expiresIn,
+          });
+          connection.accessToken = refreshed.accessToken;
+          if (refreshed.refreshToken) connection.refreshToken = refreshed.refreshToken;
+          result = await resolveCodexLiveModels(connection, { forceRefresh: true });
         }
-      }),
-      parseFn: parseCodexModels,
-      errorLabel: "Failed to fetch Codex models"
-    })
+      }
+      return result.models.length ? { models: result.models }
+        : {
+            models: getStaticProviderModels("codex").filter((model) => !model.internal),
+            warning: result.warning || "Codex live catalog unavailable",
+          };
+    },
   },
   antigravity: {
     url: "https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:models",
