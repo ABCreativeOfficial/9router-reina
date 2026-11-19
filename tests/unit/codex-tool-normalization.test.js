@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { CodexExecutor } from "../../open-sse/executors/codex.js";
+import { claudeToOpenAIRequest } from "../../open-sse/translator/request/claude-to-openai.js";
+import { openaiToOpenAIResponsesRequest } from "../../open-sse/translator/request/openai-responses.js";
 
 function normalizeTools(tools) {
   const executor = new CodexExecutor();
@@ -20,7 +22,7 @@ function normalizeTools(tools) {
 }
 
 describe("CodexExecutor tool normalization", () => {
-  it("preserves explicit strict flags without changing optional arguments", () => {
+  it("preserves explicit strict flags and defaults unspecified function tools to non-strict", () => {
     const parameters = {
       type: "object",
       properties: { sessionID: { type: "string" } },
@@ -34,12 +36,94 @@ describe("CodexExecutor tool normalization", () => {
       { type: "function", name: "unspecified", parameters },
     ]);
 
-    expect(tools.map((tool) => tool.strict)).toEqual([false, true, false, true, undefined]);
+    expect(tools.map((tool) => tool.strict)).toEqual([false, true, false, true, false]);
     for (const tool of tools) {
       expect(tool.parameters).toEqual(parameters);
       expect(tool.parameters.required).toEqual([]);
     }
-    expect(tools[4]).not.toHaveProperty("strict");
+    expect(tools[4]).toHaveProperty("strict", false);
+  });
+
+  it("allows the 82nd Claude Code tool to retain unsupported strict schema keywords", () => {
+    const problematicParameters = {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          not: { enum: ["disallowed"] },
+        },
+      },
+      required: [],
+    };
+    const incomingTools = Array.from({ length: 81 }, (_, i) => ({
+      type: "function",
+      name: `tool_${i}`,
+      parameters: { type: "object", properties: {} },
+    }));
+    incomingTools.push({ type: "function", name: "tool_81", parameters: problematicParameters });
+
+    const tools = normalizeTools(incomingTools);
+
+    expect(tools).toHaveLength(82);
+    expect(tools[81].name).toBe("tool_81");
+    expect(tools[81].strict).toBe(false);
+    expect(tools[81].parameters).toEqual(problematicParameters);
+    expect(tools[81].parameters.required).toEqual([]);
+    expect(tools[81].parameters.properties.query.not).toEqual({ enum: ["disallowed"] });
+    expect(tools.slice(0, 81).every(tool => tool.strict === false)).toBe(true);
+  });
+
+  it("preserves Claude Code's schema through Claude -> OpenAI -> Responses -> Codex", () => {
+    const inputSchema = {
+      type: "object",
+      properties: { query: { type: "string", not: { enum: ["bad"] } } },
+      required: ["query"],
+    };
+    const claudeRequest = {
+      model: "gpt-6.2-sol",
+      messages: [{ role: "user", content: "Search for this" }],
+      tools: [{ name: "search", description: "Search", input_schema: inputSchema }],
+    };
+
+    const openai = claudeToOpenAIRequest("gpt-6.2-sol", claudeRequest, true, {});
+    const responses = openaiToOpenAIResponsesRequest("gpt-6.2-sol", openai, true, {});
+    const executor = new CodexExecutor();
+    executor.transformRequest("gpt-6.2-sol", responses, true, {
+      connectionId: "test-claude-code-to-codex",
+      providerSpecificData: {},
+    });
+
+    expect(responses.tools).toHaveLength(1);
+    expect(responses.tools[0]).toMatchObject({
+      type: "function",
+      name: "search",
+      strict: false,
+      parameters: inputSchema,
+    });
+    expect(claudeRequest.tools[0].input_schema).toEqual(inputSchema);
+  });
+
+  it("preserves strict flags inside Responses namespaces while defaulting missing ones", () => {
+    const tools = normalizeTools([{
+      type: "namespace",
+      name: "mcp_tools",
+      tools: [
+        {
+          type: "function",
+          name: "with_not",
+          parameters: {
+            type: "object",
+            properties: { value: { type: "string", not: { const: "bad" } } },
+          },
+        },
+        { type: "function", name: "explicit_true", strict: true, parameters: { type: "object", properties: {} } },
+        { type: "function", name: "explicit_false", strict: false, parameters: { type: "object", properties: {} } },
+        { type: "custom", name: "freeform", format: { type: "text" } },
+      ],
+    }]);
+
+    expect(tools[0].tools.map(tool => tool.strict)).toEqual([false, true, false, undefined]);
+    expect(tools[0].tools[0].parameters.properties.value.not).toEqual({ const: "bad" });
   });
 
   it("preserves Responses text.format for structured outputs", () => {

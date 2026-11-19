@@ -131,7 +131,7 @@ describe("Codex GPT-6 Sol/Luna transport", () => {
     const body = JSON.parse(options.body);
     expect(options.headers["x-openai-internal-codex-responses-lite"]).toBeUndefined();
     expect(body.tools).toEqual([
-      { type: "function", name: "run", parameters: { type: "object", properties: {} } },
+      { type: "function", name: "run", parameters: { type: "object", properties: {} }, strict: false },
       { type: "web_search" },
     ]);
     expect(body.input.some(item => item.type === "additional_tools")).toBe(false);
