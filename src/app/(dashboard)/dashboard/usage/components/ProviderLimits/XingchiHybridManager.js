@@ -4,6 +4,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { parseXingchiCsv } from "@/shared/utils/xingchiCsv.js";
 
 const PENDING_PROTOCOL = "xingchi-pair-v1";
+const TODAY_IN_XINGCHI = () => new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+}).format(new Date());
+
+function claimState(account) {
+  if (!account.paired) return { label: "Belum pair", claimed: false, color: "text-text-muted" };
+  const claimed = account.claimedToday === true && account.lastClaimDate === TODAY_IN_XINGCHI()
+    && (!account.nextClaimAt || Date.parse(account.nextClaimAt) > Date.now());
+  if (claimed) return { label: "✓ Sudah check-in hari ini", claimed: true, color: "text-emerald-600 dark:text-emerald-400" };
+  if (!account.lastStatusAt) return { label: "Status belum dicek", claimed: false, color: "text-amber-600" };
+  if (account.checkinEnabled === false) return { label: "Check-in dinonaktifkan Xingchi", claimed: false, color: "text-text-muted" };
+  return { label: "Belum check-in hari ini", claimed: false, color: "text-amber-600 dark:text-amber-400" };
+}
 
 export default function XingchiHybridManager() {
   const [accounts, setAccounts] = useState([]);
@@ -12,21 +25,52 @@ export default function XingchiHybridManager() {
   const [message, setMessage] = useState("");
   const [csvText, setCsvText] = useState("");
   const [pending, setPending] = useState(null);
+  const [checking, setChecking] = useState({});
   const polling = useRef(null);
+  const pairListener = useRef(null);
+  const pairError = useRef("");
 
   const refresh = useCallback(async () => {
     const response = await fetch("/api/xingchi/accounts", { cache: "no-store" });
     if (!response.ok) throw new Error("Unable to load Xingchi accounts.");
     const payload = await response.json();
     setAccounts(payload.accounts || []);
+    return payload.accounts || [];
+  }, []);
+
+  const refreshStatus = useCallback(async (account) => {
+    setChecking((previous) => ({ ...previous, [account.id]: true }));
+    try {
+      const response = await fetch(`/api/xingchi/accounts/${encodeURIComponent(account.id)}/checkin`, { cache: "no-store" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `Unable to check ${account.email}.`);
+      setAccounts((previous) => previous.map((item) => item.id === account.id ? result.account : item));
+    } finally { setChecking((previous) => ({ ...previous, [account.id]: false })); }
   }, []);
 
   useEffect(() => {
     if (!isOpen) return;
-    const timer = setTimeout(() => { void refresh().catch((error) => setMessage(error.message)); }, 0);
-    return () => clearTimeout(timer);
-  }, [isOpen, refresh]);
-  useEffect(() => () => { if (polling.current) clearInterval(polling.current); }, []);
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const list = await refresh();
+        if (cancelled) return;
+        const paired = list.filter((account) => account.paired);
+        let cursor = 0;
+        await Promise.all(Array.from({ length: Math.min(4, paired.length) }, async () => {
+          while (!cancelled && cursor < paired.length) {
+            const account = paired[cursor++];
+            await refreshStatus(account).catch(() => { /* Per-account refresh button allows retry. */ });
+          }
+        }));
+      } catch (error) { if (!cancelled) setMessage(error.message); }
+    }, 0);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [isOpen, refresh, refreshStatus]);
+  useEffect(() => () => {
+    if (polling.current) clearInterval(polling.current);
+    if (pairListener.current) window.removeEventListener("message", pairListener.current);
+  }, []);
 
   const doRequest = async (path, method, body) => {
     const response = await fetch(path, { method, headers: { "Content-Type": "application/json" },
@@ -51,8 +95,7 @@ export default function XingchiHybridManager() {
 
   const beginPair = async (account) => {
     setMessage(""); setBusy(account.id);
-    // Open immediately during the click gesture, avoiding popup blockers.
-    const tab = window.open("https://xingchiapi.com/", "_blank");
+    pairError.current = "";
     try {
       const { pairing } = await doRequest("/api/xingchi/pair/start", "POST", { accountId: account.id });
       setPending(pairing);
@@ -61,19 +104,28 @@ export default function XingchiHybridManager() {
         if (event.source === window && event.origin === window.location.origin
           && event.data?.source === "9router-xingchi-extension" && event.data?.protocol === PENDING_PROTOCOL
           && event.data?.pairingId === pairing.pairingId) {
-          acknowledged = event.data.type === "PAIR_ACCEPTED";
+          if (event.data.type === "PAIR_ACCEPTED") {
+            acknowledged = true;
+            setMessage(`Login popup opened for ${pairing.accountEmail}. Sign in normally; 9Router will pair automatically.`);
+          } else if (event.data.type === "PAIR_REJECTED") {
+            acknowledged = true;
+            setMessage("Bridge could not open the Xingchi popup. Check Chrome extension permissions and try again.");
+          } else if (event.data.type === "PAIR_PROGRESS") {
+            if (!["LOGIN_READY", "PAIRED"].includes(event.data.code)) pairError.current = event.data.message || "";
+            if (event.data.message) setMessage(event.data.message);
+          }
         }
       };
+      if (pairListener.current) window.removeEventListener("message", pairListener.current);
+      pairListener.current = onAck;
       window.addEventListener("message", onAck);
       window.postMessage({ source: "9router-xingchi", protocol: PENDING_PROTOCOL, type: "PAIR_SESSION",
         pairingId: pairing.pairingId, pairingSecret: pairing.pairingSecret, routerOrigin: pairing.routerOrigin,
         providerOrigin: pairing.providerOrigin, accountEmail: pairing.accountEmail, expiresAt: pairing.expiresAt }, window.location.origin);
-      if (!tab) setMessage("Popup blocked. Open xingchiapi.com in another tab, then click the extension icon.");
-      else setMessage(`Sign in to ${pairing.accountEmail} on Xingchi, then click the extension icon → Pair session.`);
+      setMessage(`Opening Xingchi login popup for ${pairing.accountEmail}…`);
       setTimeout(() => {
-        window.removeEventListener("message", onAck);
-        if (!acknowledged) setMessage("9Router Bridge was not detected on this dashboard tab. Install/update the extension and refresh 9Router before pairing.");
-      }, 2000);
+        if (!acknowledged) setMessage("9Router Bridge did not respond. Install/update the v0.7 extension and refresh 9Router.");
+      }, 3000);
       if (polling.current) clearInterval(polling.current);
       polling.current = setInterval(async () => {
         try {
@@ -82,12 +134,20 @@ export default function XingchiHybridManager() {
           if (["success", "expired", "error"].includes(data.status)) {
             clearInterval(polling.current); polling.current = null;
             setPending(null);
-            if (data.status === "success") { setMessage(`${pairing.accountEmail} paired successfully.`); await refresh(); }
-            else setMessage(`Pairing ${data.status}. Retry to generate a new session.`);
+            if (pairListener.current === onAck) {
+              window.removeEventListener("message", onAck);
+              pairListener.current = null;
+            }
+            if (data.status === "success") {
+              setMessage(`${pairing.accountEmail} paired successfully.`);
+              await refresh();
+              void refreshStatus(account).catch(() => {});
+            }
+            else setMessage(pairError.current || `Pairing ${data.status}. Retry to generate a new session.`);
           }
         } catch { /* retry until the pairing expires */ }
       }, 1500);
-    } catch (error) { setMessage(error.message); }
+    } catch (error) { setMessage(error.message); setPending(null); }
     finally { setBusy(""); }
   };
 
@@ -96,7 +156,11 @@ export default function XingchiHybridManager() {
     try {
       if (action === "checkin") {
         const result = await doRequest(`/api/xingchi/accounts/${account.id}/checkin`, "POST");
-        setMessage(`${account.email}: ${result.result.status === "already_claimed" ? "Already checked in today" : "Check-in successful"}.`);
+        setMessage(`${account.email}: ${result.result.status === "already_claimed" ? "Already checked in today" :
+          result.result.status === "success" ? "Check-in successful" : "Check-in is disabled by Xingchi"}.`);
+      } else if (action === "status") {
+        await refreshStatus(account);
+        setMessage(`${account.email}: check-in status refreshed.`);
       } else if (action === "toggle") {
         await doRequest(`/api/xingchi/accounts/${account.id}`, "PATCH", { autoCheckin: !account.autoCheckin });
       } else if (action === "delete") {
@@ -113,7 +177,7 @@ export default function XingchiHybridManager() {
       <div className="flex items-center justify-between gap-2">
         <div>
           <p className="text-sm font-semibold text-text-primary">Xingchi Daily Check-in · Hybrid Bridge</p>
-          <p className="mt-0.5 text-[11px] text-text-muted">Pair each login once in Chrome; 9Router can check in without separate browser profiles.</p>
+          <p className="mt-0.5 text-[11px] text-text-muted">Pair opens an isolated Xingchi login popup and prefills the selected email; check-in uses the encrypted saved session.</p>
         </div>
         <button type="button" className="rounded-md border border-border-subtle px-3 py-1.5 text-xs text-primary" onClick={() => setIsOpen(!isOpen)}>{isOpen ? "Hide" : "Manage"}</button>
       </div>
@@ -131,22 +195,34 @@ export default function XingchiHybridManager() {
               className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50">Import accounts + keys</button>
           </div>
           {accounts.length === 0 && <p className="text-xs text-text-muted">No Xingchi accounts imported yet.</p>}
-          {accounts.map((account) => (
+          {accounts.map((account) => {
+            const claim = claimState(account);
+            return (
             <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-black/10 p-2.5 text-xs dark:border-white/10">
               <div className="min-w-0">
                 <div className="font-semibold text-text-primary">{account.name || account.email}</div>
-                <div className="text-text-muted">{account.email} · {account.paired ? "Paired" : "Not paired"}{account.lastClaimDate ? ` · Last: ${account.lastClaimDate}` : ""}</div>
+                <div className="text-text-muted">{account.email} · {account.paired ? "Paired" : "Not paired"}</div>
+                <div className={`mt-0.5 font-medium ${claim.color}`}>{checking[account.id] ? "↻ Checking today's status…" : claim.label}
+                  {account.lastClaimDate ? <span className="ml-1 font-normal text-text-muted">· Terakhir: {account.lastClaimDate}</span> : null}
+                </div>
                 {account.lastError && <div className="max-w-[350px] truncate text-red-500" title={account.lastError}>{account.lastError}</div>}
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
-                <button type="button" disabled={!!busy} onClick={() => beginPair(account)} className="rounded-md border border-primary/30 px-2 py-1 text-primary disabled:opacity-50">{account.paired ? "Re-pair" : "Pair in Chrome"}</button>
-                <button type="button" disabled={!!busy || !account.paired} onClick={() => modify(account, "checkin")} className="rounded-md border border-border-subtle px-2 py-1 disabled:opacity-50">Check in</button>
+                <button type="button" disabled={!!busy} onClick={() => beginPair(account)} className="rounded-md border border-primary/30 px-2 py-1 text-primary disabled:opacity-50">{account.paired ? "Re-pair" : "Pair"}</button>
+                <button type="button" disabled={!!busy || !account.paired || !!checking[account.id] || claim.claimed || account.checkinEnabled === false}
+                  onClick={() => modify(account, "checkin")}
+                  className={`rounded-md border px-2 py-1 disabled:opacity-60 ${claim.claimed ? "border-emerald-500/30 text-emerald-600" : "border-border-subtle"}`}>
+                  {claim.claimed ? "✓ Sudah Check-in" : "Check-in"}
+                </button>
+                <button type="button" title="Refresh today's check-in status without claiming" aria-label={`Refresh check-in status for ${account.email}`}
+                  disabled={!!busy || !account.paired || !!checking[account.id]} onClick={() => modify(account, "status")}
+                  className="rounded-md border border-border-subtle px-2 py-1 disabled:opacity-50">↻</button>
                 <label className="flex items-center gap-1 text-text-muted" title="Auto check-in every 15 minutes when eligible; OFF by default. Requires a refresh token."><input type="checkbox" checked={account.autoCheckin === true} disabled={!!busy || !account.paired || !account.renewable} onChange={() => modify(account, "toggle")} /> Auto</label>
                 <button type="button" disabled={!!busy} onClick={() => modify(account, "delete")} className="text-red-500 disabled:opacity-50">Remove</button>
               </div>
             </div>
-          ))}
-          {pending && <p className="text-xs text-amber-600">Pairing active until {new Date(pending.expiresAt).toLocaleTimeString()}. Finish inside the bridge popup on Xingchi.</p>}
+          ); })}
+          {pending && <p className="text-xs text-amber-600">Pairing active until {new Date(pending.expiresAt).toLocaleTimeString()}. Complete the Xingchi login in the popup; the bridge will capture the session automatically.</p>}
           {message && <p role="status" className="text-xs text-text-primary">{message}</p>}
         </div>
       )}

@@ -7,6 +7,7 @@ import { OAUTH_ENDPOINTS, buildKimiHeaders, NOUS_ATTRIBUTION } from "../config/a
 import { buildClineHeaders } from "../shared/clineAuth.js";
 import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { injectReasoningContent } from "../utils/reasoningContentInjector.js";
+import { forceNonStrictResponsesFunctionTools } from "../utils/responsesToolSchemas.js";
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
 import { extractClaudeSessionIdFromUserId } from "../utils/claudeCloaking.js";
 import { isNewApiChat, parseNewApiError, summarizeNewApiRequest } from "../services/newapi/inference.js";
@@ -119,6 +120,12 @@ export class DefaultExecutor extends BaseExecutor {
       if (this.config.quirks?.disableResponseStorage) {
         if (transformed === body) transformed = { ...transformed };
         transformed.store = false;
+      }
+      // Some Responses gateways compile omitted/strict schemas even when
+      // Claude Code sends non-strict MCP tools containing `not`/`allOf`.
+      // Apply this only to explicitly opted-in providers (e.g. Xingchi).
+      if (this.config.quirks?.forceNonStrictResponsesTools) {
+        transformed = forceNonStrictResponsesFunctionTools(transformed);
       }
     }
 

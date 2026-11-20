@@ -39,7 +39,9 @@ export default {
       "User-Agent": `codex_cli_rs/${CODEX_CLI_VERSION}`,
       version: CODEX_CLI_VERSION,
     },
-    quirks: { disableResponseStorage: true },
+    // Claude Code can send hundreds of MCP tool schemas with JSON Schema
+    // keywords that strict Responses validators do not implement (e.g. `not`).
+    quirks: { disableResponseStorage: true, forceNonStrictResponsesTools: true },
   },
   // Durable offline catalog provided for Xingchi: keep these models visible
   // even when the upstream catalog is empty, partial, or temporarily offline.
