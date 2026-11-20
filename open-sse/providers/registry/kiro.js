@@ -1,3 +1,9 @@
+import { KIRO_IDE_VERSION } from "../../config/kiroClientVersions.js";
+
+// Registry metadata is browser-safe; server-side KiroExecutor substitutes a
+// credential-specific, SHA-256 machine ID before the request is transmitted.
+const registryKiroSuffix = `KiroIDE-${KIRO_IDE_VERSION}-d3253ca5f340f762054342ccb2a987f42a7de4dd1584f54add497f3c4423173a`;
+
 export default {
   id: "kiro",
   priority: 10,

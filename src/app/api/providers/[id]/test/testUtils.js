@@ -9,6 +9,7 @@ import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js"
 import { proxyAwareFetch } from "open-sse/utils/proxyFetch.js";
 import { buildKiroIdentityHeaders } from "open-sse/shared/kiroIdentity.js";
 import { CODEX_CLI_VERSION } from "open-sse/config/appConstants.js";
+import { buildKiroCliUserAgent } from "open-sse/config/kiroClientIdentity.js";
 import { GROK_CLI_PAGER_USER_AGENT, GROK_CLI_VERSION } from "open-sse/config/grokCli.js";
 import {
   NOUS_CHAT_COMPLETIONS_URL,

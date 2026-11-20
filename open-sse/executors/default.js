@@ -13,6 +13,7 @@ import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
 import { extractClaudeSessionIdFromUserId } from "../utils/claudeCloaking.js";
 import { wantsGeminiLongDecode, withGeminiLongDecode } from "../utils/geminiLongDecode.js";
 import { isNewApiChat, parseNewApiError, summarizeNewApiRequest } from "../services/newapi/inference.js";
+import { buildKiroCliUserAgent } from "../config/kiroClientIdentity.js";
 
 const newApiErrors = new WeakMap();
 

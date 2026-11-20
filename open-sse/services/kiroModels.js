@@ -20,7 +20,7 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import { refreshKiroToken } from "./tokenRefresh.js";
 import { buildKiroIdentityHeaders } from "../shared/kiroIdentity.js";
 
@@ -144,7 +144,9 @@ async function fetchKiroCatalogRaw(credentials, signal) {
 
   const headers = {
     ...buildKiroFingerprintHeaders(credentials),
-    "Authorization": `Bearer ${credentials?.accessToken || ""}`
+    "Authorization": `Bearer ${credentials?.accessToken || ""}`,
+    ...(credentials?.providerSpecificData?.authMethod === "api_key" ? { TokenType: "API_KEY" } : {}),
+    ...(credentials?.providerSpecificData?.authMethod === "external_idp" ? { TokenType: "EXTERNAL_IDP" } : {}),
   };
 
   const controller = new AbortController();

@@ -4,6 +4,7 @@
 
 import { proxyAwareFetch } from "../../utils/proxyFetch.js";
 import { resolveDefaultProfileArn } from "../../config/kiroConstants.js";
+import { buildKiroIdeHeaders } from "../../config/kiroClientIdentity.js";
 import { U, parseResetTime } from "./shared.js";
 import { buildKiroIdentityHeaders } from "../../shared/kiroIdentity.js";
 
@@ -50,6 +51,7 @@ function parseKiroQuotaData(data) {
 }
 
 export async function getKiroUsage(accessToken, providerSpecificData, proxyOptions = null) {
+  const identityHeaders = buildKiroIdeHeaders({ accessToken, providerSpecificData });
   const authMethod = providerSpecificData?.authMethod || "builder-id";
   // API-key Kiro connections authenticate the quota API the same way the chat
   // executor does: a bearer token plus a `tokentype: API_KEY` header so
