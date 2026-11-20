@@ -785,6 +785,24 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "tokenharbor":
+        // The official allowance API reports the *used percentage* for its
+        // rolling seven-day free and Pass windows. Leave remainingPercentage
+        // explicit (especially when exhausted=true but used_pct was rounded).
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              resetAt: quota.resetAt || null,
+              remainingPercentage: quota.remainingPercentage,
+              unit: quota.unit,
+            });
+          });
+        }
+        break;
+
       case "cursor":
         // Plan spend is USD (cents from GetCurrentPeriodUsage). Forward
         // remainingPercentage only — do not pass absolute remaining (UI treats it as %).

@@ -1,4 +1,4 @@
-export default {
+const tokenHarborProvider = {
   id: "tokenharbor",
   priority: 120,
   alias: "tokenharbor",
@@ -28,6 +28,9 @@ export default {
     // would force one format (e.g. claude-adaptive) onto every model.
     baseUrl: "https://tokenharbor.ai/v1/chat/completions",
     validateUrl: "https://tokenharbor.ai/v1/models",
+    usage: {
+      url: "https://tokenharbor.ai/api/cli/free-tier",
+    },
     retry: {
       429: 2,
     },
@@ -46,4 +49,12 @@ export default {
   ],
   modelsFetcher: { url: "https://tokenharbor.ai/v1/models", type: "openai" },
   passthroughModels: true,
+  // Official API-key allowance endpoint: weekly free-model percentage,
+  // optional Pass window, resets and whether free routes are enabled.
+  features: {
+    usage: true,
+    usageApikey: true,
+  },
 };
+
+export default tokenHarborProvider;
