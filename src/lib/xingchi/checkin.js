@@ -38,38 +38,78 @@ async function guarded(id, job) {
   return pending;
 }
 
+function xingchiToday() {
+  return new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+}
+
+async function readCurrentCheckinStatus(id, fetchFn) {
+  let account = await getAccount(id);
+  if (!account?.sealed) throw new Error("Account is not paired. Open Xingchi in Chrome and pair first.");
+  const tokens = unsealTokens(id, account.sealed);
+  if (!tokens?.accessToken) throw new Error("Stored session missing. Pair again.");
+  const getStatus = (token) => api("/user/checkin?timezone=Asia%2FShanghai", token, "GET", undefined, fetchFn);
+  let response = await getStatus(tokens.accessToken);
+  if ((response.status === 401 || response.code === "INVALID_TOKEN") && tokens.refreshToken) {
+    const refreshed = await refreshXingchiSession(tokens.refreshToken, fetchFn);
+    const identity = await validateXingchiSession(refreshed.accessToken, fetchFn);
+    if (identity.email?.trim().toLowerCase() !== account.email) {
+      throw new Error("Refreshed session identity differs from paired account.");
+    }
+    account = await saveAccount({ ...account, sealed: sealTokens(id, refreshed), status: "paired" });
+    response = await getStatus(refreshed.accessToken);
+  }
+  if (!response.ok) throw new Error(`Could not read Xingchi check-in status (${response.status}).`);
+  return { account, status: response.data || {} };
+}
+
+/** A read-only, up-to-date status probe. Never claims a reward. */
+export async function getCheckinStatus(id, { fetchFn = fetch } = {}) {
+  return guarded(id, async () => {
+    const { account, status } = await readCurrentCheckinStatus(id, fetchFn);
+    const checkedInToday = status.claimed_today === true;
+    const today = status.today || xingchiToday();
+    const nextClaimAt = checkedInToday
+      ? status.next_claim_at || new Date(Date.parse(`${today}T16:00:00Z`)).toISOString()
+      : null;
+    await saveAccount({ ...account, status: "paired", claimedToday: checkedInToday,
+      checkinEnabled: status.enabled !== false,
+      lastClaimDate: checkedInToday ? today : account.lastClaimDate ?? null,
+      nextClaimAt,
+      lastStatusAt: new Date().toISOString(), lastError: null });
+    return { checkedInToday, enabled: status.enabled !== false,
+      nextClaimAt, today };
+  });
+}
+
 export async function checkinAccount(id, { manual = false, fetchFn = fetch } = {}) {
   return guarded(id, async () => {
     let account = await getAccount(id);
     if (!account?.sealed) throw new Error("Account is not paired. Open Xingchi in Chrome and pair first.");
     if (!manual && account.autoCheckin !== true) return { skipped: "disabled" };
     if (!manual && account.nextClaimAt && Date.parse(account.nextClaimAt) > Date.now()) return { skipped: "waiting_for_reset" };
-    const tokens = unsealTokens(id, account.sealed);
-    if (!tokens?.accessToken) throw new Error("Stored session missing. Pair again.");
-    const getStatus = (token) => api("/user/checkin?timezone=Asia%2FShanghai", token, "GET", undefined, fetchFn);
-    let status = await getStatus(tokens.accessToken);
-    if ((status.status === 401 || status.code === "INVALID_TOKEN") && tokens.refreshToken) {
-      const refreshed = await refreshXingchiSession(tokens.refreshToken, fetchFn);
-      const identity = await validateXingchiSession(refreshed.accessToken, fetchFn);
-      if (identity.email?.trim().toLowerCase() !== account.email) throw new Error("Refreshed session identity differs from paired account.");
-      account = await saveAccount({ ...account, sealed: sealTokens(id, refreshed), status: "paired" });
-      status = await getStatus(refreshed.accessToken);
+    const current = await readCurrentCheckinStatus(id, fetchFn);
+    account = current.account;
+    const alreadyClaimed = current.status.claimed_today === true;
+    if (!alreadyClaimed && current.status.enabled === false) {
+      await saveAccount({ ...account, checkinEnabled: false, claimedToday: false,
+        lastStatusAt: new Date().toISOString(), lastError: null });
+      return { skipped: "provider_disabled" };
     }
-    if (!status.ok) throw new Error(`Could not read Xingchi check-in status (${status.status}).`);
-    const alreadyClaimed = status.data?.claimed_today === true;
-    if (!alreadyClaimed && status.data?.enabled === false) return { skipped: "provider_disabled" };
 
     const latest = unsealTokens(id, account.sealed);
     const result = alreadyClaimed
-      ? { ok: true, data: { status: status.data } }
+      ? { ok: true, data: { status: current.status } }
       : await api("/user/checkin?timezone=Asia%2FShanghai", latest.accessToken, "POST", undefined, fetchFn);
     if (!result.ok) throw new Error(`Xingchi check-in failed (${result.status}).`);
     const claimed = result.data?.status || result.data || {};
     if (claimed.claimed_today !== true) throw new Error("Xingchi did not confirm today's check-in.");
-    const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const today = xingchiToday();
     // midnight of the *next* Shanghai calendar date, independent of server TZ
     const nextClaimAt = claimed.next_claim_at || new Date(Date.parse(`${today}T16:00:00Z`)).toISOString();
-    await saveAccount({ ...account, status: "paired", claimedToday: true, lastClaimDate: claimed.today || today,
+    await saveAccount({ ...account, status: "paired", claimedToday: true, checkinEnabled: true,
+      lastClaimDate: claimed.today || today, lastStatusAt: new Date().toISOString(),
       nextClaimAt, lastReward: alreadyClaimed ? account.lastReward ?? null : result.data?.amount ?? null,
       lastCheckinAt: new Date().toISOString(), lastError: null });
     return { status: alreadyClaimed ? "already_claimed" : "success", nextClaimAt,

@@ -9,7 +9,7 @@ vi.mock("@/lib/xingchi/hybridStore.js", () => ({
   unsealTokens: vi.fn((_id, value) => value),
 }));
 
-import { checkinAccount } from "../../src/lib/xingchi/checkin.js";
+import { checkinAccount, getCheckinStatus } from "../../src/lib/xingchi/checkin.js";
 
 function jsonResponse(data, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => data };
@@ -70,5 +70,43 @@ describe("Xingchi Hybrid daily check-in (offline HTTP mocks)", () => {
       .mockResolvedValueOnce(jsonResponse({ code: 0, data: { email: "attacker@example.com" } }));
     await expect(checkinAccount("account-1", { manual: true, fetchFn })).rejects.toThrow(/identity differs/);
     expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it("reads today's check-in status without claiming a reward", async () => {
+    const fetchFn = vi.fn(async () => jsonResponse({ code: 0, data: {
+      claimed_today: true, enabled: true, today: "2026-11-21",
+      next_claim_at: "2026-11-22T00:00:00+08:00",
+    } }));
+    const result = await getCheckinStatus("account-1", { fetchFn });
+    expect(result).toMatchObject({ checkedInToday: true, enabled: true, today: "2026-11-21" });
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(fetchFn.mock.calls[0][1].method).toBe("GET");
+    expect(state.account).toMatchObject({ claimedToday: true, checkinEnabled: true, lastClaimDate: "2026-11-21" });
+    expect(state.account.lastStatusAt).toBeTruthy();
+  });
+
+  it("clears stale claimedToday after the daily reset, preserving the previous claim date", async () => {
+    state.account = { ...state.account, claimedToday: true, lastClaimDate: "2026-11-20",
+      nextClaimAt: "2026-11-21T00:00:00+08:00" };
+    const fetchFn = vi.fn(async () => jsonResponse({ code: 0, data: {
+      enabled: true, claimed_today: false, today: "2026-11-21",
+    } }));
+    expect(await getCheckinStatus("account-1", { fetchFn })).toMatchObject({ checkedInToday: false });
+    expect(state.account.claimedToday).toBe(false);
+    expect(state.account.lastClaimDate).toBe("2026-11-20");
+    expect(state.account.nextClaimAt).toBeNull();
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes expired access token before the read-only status probe", async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ code: "INVALID_TOKEN" }, 401))
+      .mockResolvedValueOnce(jsonResponse({ code: 0, data: { access_token: "new-access", refresh_token: "new-refresh" } }))
+      .mockResolvedValueOnce(jsonResponse({ code: 0, data: { email: "one@example.com" } }))
+      .mockResolvedValueOnce(jsonResponse({ code: 0, data: { claimed_today: false, enabled: true } }));
+    expect((await getCheckinStatus("account-1", { fetchFn })).checkedInToday).toBe(false);
+    expect(state.account.sealed.accessToken).toBe("new-access");
+    expect(fetchFn.mock.calls.map((c) => c[1].method)).toEqual(["GET", "POST", "GET", "GET"]);
+    expect(fetchFn.mock.calls.filter((c) => c[0].includes("/user/checkin"))).toHaveLength(2);
   });
 });
