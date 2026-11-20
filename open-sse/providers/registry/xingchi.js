@@ -24,6 +24,10 @@ export default {
   transport: {
     baseUrl: "https://api.xingchiapi.com/v1/responses",
     validateUrl: "https://api.xingchiapi.com/v1/models",
+    usage: {
+      url: "https://api.xingchiapi.com/v1/usage",
+      billingUrl: "https://api.xingchiapi.com/v1/sub2api/billing",
+    },
     format: "openai-responses",
     forceStream: true,
     headers: {
@@ -61,4 +65,10 @@ export default {
     { id: "codex-mini-latest", name: "Codex Mini", contextWindow: 200000, maxOutput: 100000, reasoning: ["low", "medium", "high"] },
   ],
   passthroughModels: true,
+  // Enable the existing API-key Quota Tracker flow. No dashboard session or
+  // additional credentials are needed: Sub2API accepts this connection's key.
+  features: {
+    usage: true,
+    usageApikey: true,
+  },
 };
