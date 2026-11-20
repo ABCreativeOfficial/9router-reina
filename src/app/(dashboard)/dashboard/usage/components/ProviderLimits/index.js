@@ -6,6 +6,7 @@ import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
 import NewApiQuotaCard from "./NewApiQuotaCard";
 import XingchiUsageDetails from "./XingchiUsageDetails";
+import TokenHarborUsageDetails from "./TokenHarborUsageDetails";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
 import {
@@ -1433,6 +1434,9 @@ export default function ProviderLimits() {
                     />
                     {conn.provider === "xingchi" && (
                       <XingchiUsageDetails details={quota?.raw?.xingchi} />
+                    )}
+                    {conn.provider === "tokenharbor" && (
+                      <TokenHarborUsageDetails details={quota?.raw?.tokenharbor} />
                     )}
                   </>
                 )}
