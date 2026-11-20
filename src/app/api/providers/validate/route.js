@@ -14,6 +14,7 @@ import {
   isNousApiKeyAccepted,
 } from "open-sse/services/nous.js";
 import { normalizeProviderId } from "@/lib/providerNormalization";
+import { probeXingchiApiKey } from "open-sse/services/xingchiValidation.js";
 
 // Probe a webSearch/webFetch provider using its searchConfig/fetchConfig.
 // Returns true if API key is accepted (status !== 401 && !== 403).
@@ -294,22 +295,9 @@ export async function POST(request) {
           break;
 
         case "xingchi": {
-          // A read-only catalog request checks the supplied key without
-          // spending inference tokens or imitating a first-party client.
-          const res = await fetch(PROVIDERS.xingchi.validateUrl, {
-            headers: {
-              "Authorization": `Bearer ${apiKey}`,
-              ...PROVIDERS.xingchi.headers,
-            },
-            signal: AbortSignal.timeout(8000),
-          });
-          isValid = res.ok;
-          if (!isValid) {
-            error = res.status === 403
-              ? "Xingchi rejected this client or key (403); check integration permission"
-              : `Xingchi validation returned HTTP ${res.status}`;
-          }
-          break;
+          // Same read-only probe as Test Connection One-by-One. The authenticated
+          // usage endpoint is more reliable than catalog-only validation.
+          return NextResponse.json(await probeXingchiApiKey(apiKey));
         }
 
         case "vercel-ai-gateway":

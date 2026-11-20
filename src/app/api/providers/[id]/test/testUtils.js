@@ -32,6 +32,7 @@ import {
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
 import { hasWebIdentityProbe, fetchWebIdentity } from "open-sse/services/webIdentity.js";
+import { probeXingchiApiKey } from "open-sse/services/xingchiValidation.js";
 
 // OAuth provider test endpoints
 const OAUTH_TEST_CONFIG = {
@@ -593,6 +594,10 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
 
   try {
     switch (connection.provider) {
+      case "xingchi":
+        return probeXingchiApiKey(connection.apiKey, {
+          fetchFn: (url, options) => fetchWithConnectionProxy(url, options, effectiveProxy),
+        });
       case "commandcode": {
         const res = await fetchWithConnectionProxy(
           "https://api.commandcode.ai/alpha/whoami?limits=1",

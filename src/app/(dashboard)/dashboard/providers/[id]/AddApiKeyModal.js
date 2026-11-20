@@ -9,9 +9,9 @@ import { planBulkAdd } from "@/shared/utils/bulkAdd";
 const BULK_PLACEHOLDER = `name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named`;
 
 function nextXingchiConnectionName(existingNames = []) {
-  const taken = new Set(existingNames);
+  const taken = new Set(existingNames.filter((name) => typeof name === "string").map((name) => name.toLowerCase()));
   let number = 1;
-  while (taken.has(`Xingchi Key ${number}`)) number++;
+  while (taken.has(`xingchi key ${number}`)) number++;
   return `Xingchi Key ${number}`;
 }
 
@@ -62,6 +62,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   const [region, setRegion] = useState(defaultRegion);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [validationMessage, setValidationMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [cliDetecting, setCliDetecting] = useState(false);
   const [cliDetectError, setCliDetectError] = useState(null);
@@ -91,6 +92,8 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
     ? `name1|sk-key1|acc123456\nname2|sk-key2|def789012\nsk-key-only-auto-named`
     : provider === "qoder" || provider === "qoder-cn"
       ? `name1|pt-xxxxx\nname2|pt-yyyyy\npt-only-auto-named`
+      : isXingchi
+        ? `sk-your-first-xingchi-key\nsk-your-second-xingchi-key\nsk-your-third-xingchi-key`
       : BULK_PLACEHOLDER;
 
   const [mode, setMode] = useState("single"); // "single" | "bulk"
@@ -141,6 +144,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
 
   const handleValidate = async () => {
     setValidating(true);
+    setValidationMessage("");
     try {
       const res = await fetch("/api/providers/validate", {
         method: "POST",
@@ -148,9 +152,11 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
         body: JSON.stringify({ provider, apiKey: formData.apiKey, providerSpecificData: buildProviderSpecificData() }),
       });
       const data = await res.json();
-      setValidationResult(data.valid ? "success" : "failed");
+      setValidationResult(data.valid ? "success" : data.inconclusive ? "inconclusive" : "failed");
+      if (isXingchi && !data.valid) setValidationMessage(data.error || "Could not verify this key");
     } catch {
-      setValidationResult("failed");
+      setValidationResult(isXingchi ? "inconclusive" : "failed");
+      if (isXingchi) setValidationMessage("Could not contact the validation service. Retry later.");
     } finally {
       setValidating(false);
     }
@@ -168,30 +174,35 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
     setSaving(true);
     try {
       let isValid = false;
+      let definiteFailure = false;
       try {
         setValidating(true);
         setValidationResult(null);
+        setValidationMessage("");
         const res = await fetch("/api/providers/validate", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider, apiKey: formData.apiKey, providerSpecificData: buildProviderSpecificData() }),
+          body: JSON.stringify({ provider, apiKey: isXingchi ? formData.apiKey.trim() : formData.apiKey, providerSpecificData: buildProviderSpecificData() }),
         });
         const data = await res.json();
         isValid = !!data.valid;
-        setValidationResult(isValid ? "success" : "failed");
+        definiteFailure = res.ok && data.inconclusive !== true;
+        setValidationResult(isValid ? "success" : data.inconclusive ? "inconclusive" : "failed");
+        if (isXingchi && !isValid) setValidationMessage(data.error || "Could not verify this key");
       } catch {
-        setValidationResult("failed");
+        setValidationResult(isXingchi ? "inconclusive" : "failed");
+        if (isXingchi) setValidationMessage("Could not contact the validation service. Retry later.");
       } finally {
         setValidating(false);
       }
 
       await onSave({
         name: isXingchi ? nextXingchiConnectionName(existingNames) : (formData.name || (isOllamaLocal ? "Ollama Local" : "")),
-        apiKey: formData.apiKey,
+        apiKey: isXingchi ? formData.apiKey.trim() : formData.apiKey,
         defaultModel: isCompatible ? formData.defaultModel.trim() : undefined,
         priority: formData.priority,
         proxyPoolId: formData.proxyPoolId === NONE_PROXY_POOL_VALUE ? null : formData.proxyPoolId,
-        testStatus: isValid ? "active" : "unknown",
+        testStatus: isValid ? "active" : isXingchi && definiteFailure ? "error" : "unknown",
         providerSpecificData: buildProviderSpecificData()
       });
     } finally {
@@ -202,21 +213,27 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   const handleBulkSubmit = async () => {
     const lines = bulkText.split("\n");
     if (!lines.length) return;
-    // Plan collision-free names against existing connections so a generated
-    // "Key N" never matches a saved name (which the backend would upsert /
-    // overwrite instead of inserting). See bulkAdd.js for the full rationale.
-    const plan = planBulkAdd(lines, existingNames, { isCloudflareAi });
+    // Keep custom names verbatim unless duplicated. Auto names advance above
+    // the highest saved suffix, avoiding gaps and unintended upsert/overwrite.
+    const plan = planBulkAdd(lines, existingNames, {
+      isCloudflareAi,
+      ...(isXingchi ? { defaultBaseName: "Xingchi Key", dedupeKeys: true } : {}),
+    });
     if (!plan.length) return;
     setSaving(true);
     setBulkResult(null);
     let success = 0;
     let failed = 0;
+    let active = 0;
+    let errored = 0;
+    let unverified = 0;
     for (const entry of plan) {
       try {
         // Validate each key before saving so bulk-added connections get a
         // real status (active/unknown) like single adds, instead of a
         // hardcoded "unknown" that never flips until a manual test.
         let isValid = false;
+        let definiteFailure = false;
         try {
           const vres = await fetch("/api/providers/validate", {
             method: "POST",
@@ -225,9 +242,11 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           });
           const vdata = await vres.json().catch(() => ({}));
           isValid = !!vdata.valid;
+          definiteFailure = vres.ok && vdata.inconclusive !== true;
         } catch {
           isValid = false;
         }
+        const testStatus = isValid ? "active" : isXingchi && definiteFailure ? "error" : "unknown";
         const res = await fetch("/api/providers", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -236,18 +255,22 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
             apiKey: entry.apiKey,
             name: entry.name,
             priority: 1,
-            testStatus: isValid ? "active" : "unknown",
+            testStatus,
             ...(entry.providerSpecificData ? { providerSpecificData: entry.providerSpecificData } : {}),
           }),
         });
-        if (res.ok) success++;
-        else failed++;
+        if (res.ok) {
+          success++;
+          if (testStatus === "active") active++;
+          else if (testStatus === "error") errored++;
+          else unverified++;
+        } else failed++;
       } catch {
         failed++;
       }
     }
     setSaving(false);
-    setBulkResult({ success, failed });
+    setBulkResult({ success, failed, active, errored, unverified });
     if (success > 0 && onBulkDone) onBulkDone();
   };
 
@@ -258,21 +281,23 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
       <div className="flex flex-col gap-4">
         {/* Mode switcher. Hidden for AWS credentials: bulk lines carry only a key, so a
             Bedrock entry would be saved with no access key id or profile and never work. */}
-        {!usesAwsCredentialForm && !isXingchi && (
+        {!usesAwsCredentialForm && (
           <div className="flex gap-2">
             <Button size="sm" variant={mode === "single" ? "primary" : "ghost"} onClick={() => { setMode("single"); setBulkResult(null); }}>Single</Button>
             <Button size="sm" variant={mode === "bulk" ? "primary" : "ghost"} onClick={() => { setMode("bulk"); setBulkResult(null); }}>Bulk Add</Button>
           </div>
         )}
 
-        {mode === "bulk" && !isXingchi && (
+        {mode === "bulk" && (
           <div className="flex flex-col gap-3">
             <p className="text-xs text-text-muted">
-              {isCloudflareAi
-                ? <>One key per line. Format: <code>name|apiKey|accountId</code> or just <code>apiKey</code> (auto-named by index).</>
+              {isXingchi
+                ? <>Paste one Xingchi API key per line. Blank lines and duplicate keys in this batch are ignored; names are assigned automatically (Xingchi Key 1, 2, ...).</>
+                : isCloudflareAi
+                ? <>One key per line. Format: <code>name|apiKey|accountId</code> or just <code>apiKey</code>. Supplied names stay unchanged unless duplicated; key-only names get sequential numbers.</>
                 : provider === "qoder" || provider === "qoder-cn"
-                  ? <>One PAT per line. Format: <code>name|pt-...</code> or just <code>pt-...</code> (auto-named by index).</>
-                  : <>One key per line. Format: <code>name|apiKey</code> or just <code>apiKey</code> (auto-named by index).</>
+                  ? <>One PAT per line. Format: <code>name|pt-...</code> or just <code>pt-...</code>. Supplied names stay unchanged unless duplicated; unnamed keys get sequential numbers.</>
+                  : <>One key per line. Format: <code>name|apiKey</code> or just <code>apiKey</code>. Supplied names stay unchanged unless duplicated; unnamed keys get sequential numbers.</>
               }
             </p>
             <textarea
@@ -282,8 +307,15 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
               onChange={(e) => setBulkText(e.target.value)}
             />
             {bulkResult && (
-              <div className={`text-sm font-medium ${bulkResult.failed > 0 ? "text-yellow-400" : "text-green-400"}`}>
-                ✓ {bulkResult.success} added{bulkResult.failed > 0 ? `, ✗ ${bulkResult.failed} failed` : ""}
+              <div className="space-y-1">
+                <div className={`text-sm font-medium ${bulkResult.failed > 0 ? "text-yellow-400" : "text-green-400"}`}>
+                  ✓ {bulkResult.success} added{bulkResult.failed > 0 ? `, ✗ ${bulkResult.failed} failed to save` : ""}
+                </div>
+                {isXingchi && (
+                  <p className="text-xs text-text-muted">
+                    {bulkResult.active} active · {bulkResult.errored} rejected · {bulkResult.unverified} not verified
+                  </p>
+                )}
               </div>
             )}
             <div className="flex gap-2">
@@ -295,7 +327,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </div>
         )}
 
-        {(mode === "single" || isXingchi) && (<>
+        {mode === "single" && (<>
         {!isXingchi && (
         <Input
           label="Name"
@@ -343,7 +375,11 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
               label={credentialLabel}
               type={isCookie ? "text" : "password"}
               value={formData.apiKey}
-              onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+              onChange={(e) => {
+                setFormData({ ...formData, apiKey: e.target.value });
+                setValidationResult(null);
+                setValidationMessage("");
+              }}
               placeholder={credentialPlaceholder}
               className="flex-1"
             />
@@ -399,9 +435,12 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </p>
         )}
         {validationResult && (
-          <Badge variant={validationResult === "success" ? "success" : "error"}>
-            {validationResult === "success" ? "Valid" : "Invalid"}
+          <Badge variant={validationResult === "success" ? "success" : validationResult === "inconclusive" ? "warning" : "error"}>
+            {validationResult === "success" ? "Valid" : validationResult === "inconclusive" ? "Could not verify" : "Invalid"}
           </Badge>
+        )}
+        {isXingchi && validationMessage && (
+          <p className="text-xs text-text-muted">{validationMessage}</p>
         )}
         {error && (
           <p className="text-xs text-red-500 break-words">{error}</p>

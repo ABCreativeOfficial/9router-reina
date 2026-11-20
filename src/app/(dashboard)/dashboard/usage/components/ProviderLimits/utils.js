@@ -765,10 +765,9 @@ export function parseQuotaData(provider, data) {
         break;
 
       case "xingchi":
-        // Sub2API returns either wallet balance, fixed API-key quota,
-        // subscription windows or rate limits. The wallet is a credit row
-        // (not a finite progress bar). Never forward absolute `remaining`
-        // since QuotaTable interprets that property as a percentage.
+        // Sub2API wallet uses balance / (balance + lifetime actual charges),
+        // like the New API progress bar; its exact balance travels separately.
+        // Never forward absolute `remaining` (the table treats that as %).
         if (data.quotas) {
           Object.entries(data.quotas).forEach(([name, quota]) => {
             normalizedQuotas.push({
@@ -778,6 +777,8 @@ export function parseQuotaData(provider, data) {
               resetAt: quota.resetAt || null,
               remainingPercentage: quota.remainingPercentage,
               isCreditBalance: quota.isCreditBalance === true,
+              isWalletBalance: quota.isWalletBalance === true,
+              remainingAmount: quota.remainingAmount,
               currency: quota.currency,
               unit: quota.unit,
             });

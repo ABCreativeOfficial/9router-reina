@@ -5,6 +5,17 @@ import { formatResetTime, getRemainingPercentage } from "./utils";
 
 const PAGE_SIZE = 10;
 
+// Wallet APIs can report fractional cents. Keep those digits visible rather
+// than rounding the real balance/spend to an apparent zero.
+function formatWalletAmount(value, currency = "USD") {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  const amount = value.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 9,
+  });
+  return currency === "USD" ? `$${amount}` : `${amount} ${currency}`;
+}
+
 /**
  * Format reset time display (Today, 12:00 PM)
  */
@@ -97,7 +108,12 @@ export default function QuotaTable({
     () => quotas.map((quota, index) => ({
       ...quota,
       index,
-      remaining: getRemainingPercentage(quota),
+      // All other quota cards intentionally use rounded percentage values.
+      // Xingchi's wallet row needs enough precision to distinguish a small
+      // actual charge from a perfectly full balance.
+      remaining: quota.isWalletBalance && Number.isFinite(quota.remainingPercentage)
+        ? Math.max(0, Math.min(100, quota.remainingPercentage))
+        : getRemainingPercentage(quota),
     })),
     [quotas],
   );
@@ -152,6 +168,11 @@ export default function QuotaTable({
         {currentPageRows.map((quota) => {
           const isUnlimited = quota.unlimited === true;
           const isCreditBalance = quota.isCreditBalance === true;
+          const isWalletBalance = quota.isWalletBalance === true;
+          const walletCurrency = quota.unit || quota.currency || "USD";
+          const walletSummary = isWalletBalance
+            ? `Balance ${formatWalletAmount(quota.remainingAmount, walletCurrency)} · Used ${formatWalletAmount(quota.used, walletCurrency)}`
+            : null;
           const colors = isCreditBalance
             ? { text: "text-blue-600 dark:text-blue-400", bg: "bg-blue-500", bgLight: "bg-blue-500/10", emoji: "💰" }
             : getColorClasses(quota.colorPercentage ?? quota.remaining);
@@ -228,6 +249,8 @@ export default function QuotaTable({
                     title={
                       isUnlimited
                         ? `${quota.used.toLocaleString()} used · Unlimited`
+                        : isWalletBalance
+                        ? `${walletSummary} · Relative to balance + recorded actual charges (not an original deposit limit)`
                         : isCreditBalance
                         ? `Credit balance: ${quota.total.toFixed(2)} ${quota.currency || ""}`
                         : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}`
@@ -235,6 +258,8 @@ export default function QuotaTable({
                   >
                     {isUnlimited
                       ? `${quota.used.toLocaleString()} used · Unlimited`
+                      : isWalletBalance
+                      ? walletSummary
                       : isCreditBalance
                       ? `Credit: ${quota.total.toFixed(2)} ${quota.currency || ""}`
                       : `${quota.used.toLocaleString()} / ${quota.total > 0 ? quota.total.toLocaleString() : "∞"}${
@@ -242,7 +267,7 @@ export default function QuotaTable({
                         }`}
                   </span>
                   <span className={`font-medium ${isUnlimited ? "text-green-600 dark:text-green-400" : isCreditBalance ? "text-blue-600 dark:text-blue-400" : colors.text} shrink-0`}>
-                    {isUnlimited ? "Unlimited" : isCreditBalance ? "" : `${quota.remaining}%`}
+                    {isUnlimited ? "Unlimited" : isCreditBalance ? "" : isWalletBalance ? `${Number(quota.remaining.toFixed(6))}%` : `${quota.remaining}%`}
                   </span>
                 </div>
               </div>
