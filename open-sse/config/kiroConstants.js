@@ -48,12 +48,48 @@ export const KIRO_THINKING_SUFFIX = "-thinking";
 export const KIRO_TOOL_NAME_MAX_LENGTH = 64;
 export const KIRO_TOOL_DESCRIPTION_MAX_LENGTH = 10237;
 export const KIRO_TOOL_ID_MAX_LENGTH = 64;
+// Two distinct upstream surfaces serve GenerateAssistantResponse, and they do
+// not share a wire protocol. Verified against the shipped Kiro IDE 1.5.11
+// extension bundle (`kiro.kiro-agent/dist/extension.js`):
+//
+//   runtime.{region}.kiro.dev  -> `com.amazon.kiro.runtimeservice` descriptor
+//     protocol  : awsJson1_0  (target header + application/x-amz-json-1.0)
+//     target    : KiroRuntimeService.GenerateAssistantResponse
+//     path      : POST /generateAssistantResponse/  (the awsJSON serializer
+//                 appends the trailing slash)
+//
+//   {q,codewhisperer}.{region}.amazonaws.com -> `com.amazon.aws.codewhisperer.streaming`
+//     protocol  : awsRestJson (no target header, application/json)
+//     path      : POST /generateAssistantResponse
+//
+// The KiroRuntime target was previously emitted as
+// `AmazonCodeWhispererStreamingService.GenerateAssistantResponse`, which is the
+// serviceTarget of the *restJson* descriptor; it is never a valid awsJson
+// target, and the runtime surface rejects the resulting mismatch.
 export const KIRO_CODEWHISPERER_TARGET =
   "AmazonCodeWhispererStreamingService.GenerateAssistantResponse";
+export const KIRO_RUNTIME_TARGET = "KiroRuntimeService.GenerateAssistantResponse";
+export const KIRO_RUNTIME_JSON_CONTENT_TYPE = "application/x-amz-json-1.0";
 export const KIRO_ENDPOINT_FALLBACK_STATUSES = new Set([401, 403, 404]);
 // Regions the Kiro runtime data plane serves. Only one of these may be spliced
 // into the hostname that receives the bearer token.
 export const KIRO_RUNTIME_REGIONS = new Set(["us-east-1", "eu-central-1"]);
+
+/** True for the awsJson1_0 KiroRuntime surface (runtime.*.kiro.dev). */
+export function isKiroRuntimeSurface(url) {
+  return typeof url === "string" && /\/\/runtime\.[a-z0-9-]+\.kiro\.dev\//.test(url);
+}
+
+/**
+ * Canonical request URL for a surface. The awsJSON serializer used by the IDE
+ * appends a trailing slash to the modeled path, so the runtime endpoint is
+ * addressed as `/generateAssistantResponse/`. The restJson CodeWhisperer hosts
+ * take the path without it.
+ */
+export function canonicalKiroUrl(url) {
+  if (!isKiroRuntimeSurface(url)) return url;
+  return url.endsWith("/") ? url : `${url.replace(/\/+$/, "")}/`;
+}
 
 // Public default CodeWhisperer profile ARNs (us-east-1), keyed by auth method.
 // Used when an account cannot resolve its own profileArn. Builder ID and social

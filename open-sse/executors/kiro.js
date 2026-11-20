@@ -9,8 +9,12 @@ import { BaseExecutor } from "./base.js";
 import { PROVIDERS } from "../config/providers.js";
 import {
   KIRO_CODEWHISPERER_TARGET,
+  KIRO_RUNTIME_TARGET,
+  KIRO_RUNTIME_JSON_CONTENT_TYPE,
   KIRO_ENDPOINT_FALLBACK_STATUSES,
   KIRO_RUNTIME_REGIONS,
+  canonicalKiroUrl,
+  isKiroRuntimeSurface,
   resolveKiroModel,
 } from "../config/kiroConstants.js";
 import { v4 as uuidv4 } from "uuid";
@@ -245,10 +249,19 @@ export class KiroExecutor extends BaseExecutor {
       "Amz-Sdk-Request": "attempt=1; max=3",
       "Amz-Sdk-Invocation-Id": uuidv4()
     };
-    if (url.includes("://codewhisperer.")) {
-      headers["X-Amz-Target"] = KIRO_CODEWHISPERER_TARGET;
+    // Each surface speaks a different protocol (see kiroConstants.js):
+    // the runtime host is awsJson1_0 and needs the target header +
+    // application/x-amz-json-1.0; the CodeWhisperer hosts are restJson and
+    // reject any target header.
+    const runtimeSurface = isKiroRuntimeSurface(url);
+    if (runtimeSurface) {
+      headers["X-Amz-Target"] = KIRO_RUNTIME_TARGET;
+      headers["Content-Type"] = KIRO_RUNTIME_JSON_CONTENT_TYPE;
     } else {
       delete headers["X-Amz-Target"];
+      if (url.includes("://codewhisperer.")) {
+        headers["X-Amz-Target"] = KIRO_CODEWHISPERER_TARGET;
+      }
     }
 
     // API-key auth: the key is stored as accessToken and sent as a bearer token
@@ -347,7 +360,9 @@ export class KiroExecutor extends BaseExecutor {
   buildUrl(model, stream, urlIndex = 0, credentials = null) {
     const baseUrls = this.getOrderedBaseUrls(credentials);
     const url = baseUrls[urlIndex] || baseUrls[0] || this.config.baseUrl;
-    return url;
+    // getOrderedBaseUrls() is also consumed by tests and region logic, so the
+    // surface-specific path shape is applied only at send time.
+    return canonicalKiroUrl(url);
   }
 
   // Retry only endpoint/auth-surface failures. Payload-invalid HTTP 400 must be

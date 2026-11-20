@@ -79,6 +79,9 @@ describe("Kiro auth-aware endpoint routing", () => {
     expect(codeWhispererHeaders["X-Amz-Target"]).toBe(
       "AmazonCodeWhispererStreamingService.GenerateAssistantResponse"
     );
-    expect(runtimeHeaders["X-Amz-Target"]).toBeUndefined();
+    // runtime.*.kiro.dev speaks awsJson1_0 under its own service target; it is
+    // not the restJson CodeWhisperer target. See kiro-wire-protocol.test.js.
+    expect(runtimeHeaders["X-Amz-Target"]).toBe("KiroRuntimeService.GenerateAssistantResponse");
+    expect(runtimeHeaders["Content-Type"]).toBe("application/x-amz-json-1.0");
   });
 });
