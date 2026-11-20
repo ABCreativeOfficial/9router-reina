@@ -11,6 +11,7 @@ import { forceNonStrictResponsesFunctionTools } from "../utils/responsesToolSche
 import { stripUnsupportedParams } from "../translator/concerns/paramSupport.js";
 import { extractClaudeSessionIdFromUserId } from "../utils/claudeCloaking.js";
 import { isNewApiChat, parseNewApiError, summarizeNewApiRequest } from "../services/newapi/inference.js";
+import { buildKiroCliUserAgent } from "../config/kiroClientIdentity.js";
 
 const newApiErrors = new WeakMap();
 
@@ -392,7 +393,7 @@ export class DefaultExecutor extends BaseExecutor {
   async refreshKiro(refreshToken, proxyOptions = null) {
     const response = await proxyAwareFetch(PROVIDERS.kiro.tokenUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json", "User-Agent": "kiro-cli/1.0.0" },
+      headers: { "Content-Type": "application/json", "Accept": "application/json", "User-Agent": buildKiroCliUserAgent() },
       body: JSON.stringify({ refreshToken })
     }, proxyOptions);
     if (!response.ok) return null;

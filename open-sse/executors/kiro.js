@@ -12,6 +12,7 @@ import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { STREAM_FIRST_CHUNK_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { AWS_EVENTSTREAM } from "../config/awsConstants.js";
 import { crc32, parseEventFrame } from "../utils/awsEventStream.js";
+import { buildKiroIdeHeaders, finalizeKiroIdeHeaders, getKiroMachineId } from "../config/kiroClientIdentity.js";
 
 const KIRO_REPAIR_BUFFER_MAX_BYTES = 8 * 1024 * 1024;
 // Regions per service host; a region outside the set is never spliced into the hostname.
@@ -231,6 +232,7 @@ export class KiroExecutor extends BaseExecutor {
   buildHeaders(credentials, stream = true, url = "") {
     const headers = {
       ...this.config.headers,
+      ...buildKiroIdeHeaders(credentials, "codewhispererstreaming"),
       "Amz-Sdk-Request": "attempt=1; max=3",
       "Amz-Sdk-Invocation-Id": uuidv4()
     };
@@ -268,13 +270,19 @@ export class KiroExecutor extends BaseExecutor {
       headers["x-amz-sso-bearer"] = credentials.accessToken;
     }
     headers["x-amzn-kiro-agent-mode"] = "spec";
-    headers["x-amzn-codewhisperer-machine-id"] = "kiro-desktop";
+    headers["x-amzn-codewhisperer-machine-id"] = getKiroMachineId(credentials);
     const profileArn = credentials?.providerSpecificData?.profileArn;
     if (profileArn) {
       headers["x-amzn-codewhisperer-profile-arn"] = profileArn;
     }
 
     return headers;
+  }
+
+  finalizeHeaders(headers, { credentials, providerOverrides }) {
+    return finalizeKiroIdeHeaders(
+      headers, credentials, "codewhispererstreaming", providerOverrides?.headers
+    );
   }
 
   /**

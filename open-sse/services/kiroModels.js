@@ -20,14 +20,9 @@
  */
 
 import { v4 as uuidv4 } from "uuid";
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 import { refreshKiroToken } from "./tokenRefresh.js";
-
-const KIRO_RUNTIME_SDK_VERSION = "1.0.0";
-const KIRO_AGENT_OS = "windows";
-const KIRO_AGENT_OS_VERSION = "10.0.26200";
-const KIRO_NODE_VERSION = "22.21.1";
-const KIRO_VERSION = "0.10.32";
+import { buildKiroIdeHeaders } from "../config/kiroClientIdentity.js";
 
 const DEFAULT_REGION = "us-east-1";
 const FETCH_TIMEOUT_MS = 30_000;
@@ -65,25 +60,8 @@ function regionFromProfileArn(profileArn) {
  * same account always presents the same machineId.
  */
 function buildKiroFingerprintHeaders(credentials) {
-  const seed =
-    credentials?.providerSpecificData?.clientId
-    || credentials?.refreshToken
-    || credentials?.providerSpecificData?.profileArn
-    || credentials?.accessToken
-    || "kiro-anonymous";
-  const machineId = createHash("sha256").update(String(seed)).digest("hex");
-
-  const userAgent =
-    `aws-sdk-js/${KIRO_RUNTIME_SDK_VERSION} ua/2.1 ` +
-    `os/${KIRO_AGENT_OS}#${KIRO_AGENT_OS_VERSION} ` +
-    `lang/js md/nodejs#${KIRO_NODE_VERSION} ` +
-    `api/codewhispererruntime#${KIRO_RUNTIME_SDK_VERSION} m/N,E ` +
-    `KiroIDE-${KIRO_VERSION}-${machineId}`;
-  const amzUserAgent = `aws-sdk-js/${KIRO_RUNTIME_SDK_VERSION} KiroIDE-${KIRO_VERSION}-${machineId}`;
-
   return {
-    "User-Agent": userAgent,
-    "x-amz-user-agent": amzUserAgent,
+    ...buildKiroIdeHeaders(credentials),
     "x-amzn-kiro-agent-mode": "vibe",
     "x-amzn-codewhisperer-optout": "true",
     "amz-sdk-request": "attempt=1; max=1",
@@ -166,7 +144,9 @@ async function fetchKiroCatalogRaw(credentials, signal) {
 
   const headers = {
     ...buildKiroFingerprintHeaders(credentials),
-    "Authorization": `Bearer ${credentials?.accessToken || ""}`
+    "Authorization": `Bearer ${credentials?.accessToken || ""}`,
+    ...(credentials?.providerSpecificData?.authMethod === "api_key" ? { TokenType: "API_KEY" } : {}),
+    ...(credentials?.providerSpecificData?.authMethod === "external_idp" ? { TokenType: "EXTERNAL_IDP" } : {}),
   };
 
   const controller = new AbortController();

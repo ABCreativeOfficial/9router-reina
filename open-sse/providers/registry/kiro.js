@@ -1,3 +1,9 @@
+import { KIRO_IDE_VERSION } from "../../config/kiroClientVersions.js";
+
+// Registry metadata is browser-safe; server-side KiroExecutor substitutes a
+// credential-specific, SHA-256 machine ID before the request is transmitted.
+const registryKiroSuffix = `KiroIDE-${KIRO_IDE_VERSION}-d3253ca5f340f762054342ccb2a987f42a7de4dd1584f54add497f3c4423173a`;
+
 export default {
   id: "kiro",
   priority: 10,
@@ -29,8 +35,8 @@ export default {
     headers: {
       "Content-Type": "application/json",
       Accept: "application/vnd.amazon.eventstream",
-      "User-Agent": "AWS-SDK-JS/3.0.0 kiro-ide/1.0.0",
-      "X-Amz-User-Agent": "aws-sdk-js/3.0.0 kiro-ide/1.0.0",
+      "User-Agent": `aws-sdk-js/1.0.0 ua/2.1 os/windows#10.0.26200 lang/js md/nodejs#22.21.1 api/codewhispererstreaming#1.0.0 m/E ${registryKiroSuffix}`,
+      "X-Amz-User-Agent": `aws-sdk-js/1.0.0 ${registryKiroSuffix}`,
     },
     tokenUrl: "https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken",
     authUrl: "https://prod.us-east-1.auth.desktop.kiro.dev",

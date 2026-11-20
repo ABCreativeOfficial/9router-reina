@@ -60,15 +60,19 @@ export default function CustomConfigCard({ providerId }) {
         notify.error(`Invalid header name: ${name}`);
         return;
       }
+      const defaultEntry = Object.entries(builtin).find(([key]) => key.toLowerCase() === name.toLowerCase());
+      // Read-only built-in headers such as Content-Type appear in the editor;
+      // an unchanged built-in is not an override and must not block Save.
+      if (defaultEntry && defaultEntry[1] === r.value) continue;
       if (BLOCKED_HEADERS.includes(name.toLowerCase())) {
         notify.error(`Header ${name} cannot be overridden`);
         return;
       }
-      if (name in headers) {
+      if (Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase())) {
         notify.error(`Duplicate header name: ${name}`);
         return;
       }
-      if (r.value !== builtin[name]) headers[name] = r.value;
+      headers[name] = r.value;
     }
 
     setSaving(true);
