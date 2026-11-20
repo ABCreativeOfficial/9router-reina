@@ -118,6 +118,12 @@ async function runHeavyStartup() {
   import("@/sse/services/backgroundTokenRefresh.js")
     .then(({ startBackgroundTokenRefresh }) => startBackgroundTokenRefresh())
     .catch((e) => console.log("[BackgroundTokenRefresh] scheduler start failed:", e.message));
+
+  // Optional Xingchi check-in: accounts are opt-in individually, and browser
+  // access is never required after a successful refresh-token pairing.
+  import("@/lib/xingchi/checkin.js")
+    .then(({ startXingchiCheckinScheduler }) => startXingchiCheckinScheduler())
+    .catch((e) => console.log("[Xingchi] scheduler start failed:", e.message));
 }
 
 // Cheap local check: keeps the scheduler module (and its provider graph) unloaded

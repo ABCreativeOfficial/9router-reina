@@ -6,6 +6,7 @@ import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
 import NewApiQuotaCard from "./NewApiQuotaCard";
 import TokenHarborUsageDetails from "./TokenHarborUsageDetails";
+import XingchiHybridManager from "./XingchiHybridManager";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
 import {
@@ -1122,6 +1123,8 @@ export default function ProviderLimits() {
           </button>
         </div>
       </div>
+
+      {(providerFilter === "xingchi" || sortedConnections.some((c) => c.provider === "xingchi")) && <XingchiHybridManager />}
 
       {/* Provider cards: 2 columns, compact */}
       {expiringFirst && (

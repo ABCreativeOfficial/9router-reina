@@ -93,7 +93,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
     : provider === "qoder" || provider === "qoder-cn"
       ? `name1|pt-xxxxx\nname2|pt-yyyyy\npt-only-auto-named`
       : isXingchi
-        ? `sk-your-first-xingchi-key\nsk-your-second-xingchi-key\nsk-your-third-xingchi-key`
+        ? `Office Key|sk-your-first-xingchi-key\nPersonal Key|sk-your-second-xingchi-key\nsk-key-with-automatic-name`
       : BULK_PLACEHOLDER;
 
   const [mode, setMode] = useState("single"); // "single" | "bulk"

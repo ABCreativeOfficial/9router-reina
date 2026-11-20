@@ -39,6 +39,7 @@ const PUBLIC_BRIDGE_PATHS = new Set([
   "/api/new-api/pair/complete",
   "/api/new-api/checkin/credential",
   "/api/new-api/checkin/complete",
+  "/api/xingchi/pair/complete",
 ]);
 
 // Public top-level prefixes (LLM API endpoints with their own API key auth).
@@ -62,6 +63,11 @@ const SENSITIVE_DASHBOARD_PATHS = [
   "/api/new-api/pair/start",
   "/api/new-api/pair/status",
   "/api/new-api/checkin/status",
+  // Xingchi account import, pairing minting and check-in control contain
+  // credentials; only the single-use bridge completion endpoint is public.
+  "/api/xingchi/accounts",
+  "/api/xingchi/pair/start",
+  "/api/xingchi/pair/status",
 ];
 
 // Always require JWT or local CLI token, even when dashboard login is disabled.
