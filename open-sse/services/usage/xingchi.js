@@ -93,19 +93,36 @@ export function normalizeXingchiUsage(data, billing = null) {
   }
 
   // "unrestricted" is the wallet mode on the verified Xingchi response.
-  // Never synthesize a total by adding balance + historical spend: a wallet
-  // need not have a fixed maximum, and other modes reuse `remaining`.
+  // Follow the New API account-progress convention: current balance divided
+  // by (balance + cumulative ACTUAL spend). This shows the proportion of the
+  // recorded balance/spend history, NOT a guaranteed original deposit cap:
+  // top-ups or refunds can change the historical baseline.
   const isWallet = !quota && !subscription && rateLimits.length === 0 &&
     (mode === "unrestricted" || /钱包|wallet/i.test(plan));
+  const actualSpent = finite(data.usage?.total?.actual_cost);
   if (isWallet && balance !== null && balance >= 0) {
-    quotas[`Balance (${unit})`] = {
-      used: 0,
-      total: balance,
-      remainingPercentage: 100,
-      resetAt: null,
-      isCreditBalance: true,
-      currency: unit,
-    };
+    if (actualSpent !== null && actualSpent >= 0) {
+      const recordedTotal = balance + actualSpent;
+      if (Number.isFinite(recordedTotal)) {
+        quotas[`Balance (${unit})`] = {
+          used: actualSpent,
+          total: recordedTotal,
+          remainingPercentage: recordedTotal > 0 ? (balance / recordedTotal) * 100 : 0,
+          remainingAmount: balance,
+          isWalletBalance: true,
+          unit,
+          resetAt: null,
+        };
+      }
+    }
+    // Some deployments omit actual_cost. Without real charged spending we
+    // cannot calculate a meaningful ratio; show the balance without a bar.
+    if (!quotas[`Balance (${unit})`]) {
+      quotas[`Balance (${unit})`] = {
+        used: 0, total: balance, remainingPercentage: 100,
+        resetAt: null, isCreditBalance: true, currency: unit,
+      };
+    }
   }
 
   const billingRate = billing?.object === "sub2api.key_billing"

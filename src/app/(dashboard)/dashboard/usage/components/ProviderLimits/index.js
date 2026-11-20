@@ -5,7 +5,6 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import QuotaTable from "./QuotaTable";
 import NewApiQuotaCard from "./NewApiQuotaCard";
-import XingchiUsageDetails from "./XingchiUsageDetails";
 import TokenHarborUsageDetails from "./TokenHarborUsageDetails";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
@@ -1202,9 +1201,14 @@ export default function ProviderLimits() {
                       />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-sm font-semibold text-text-primary truncate">
-                        {providerDisplayName}
-                      </h3>
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <h3 className="min-w-0 truncate text-sm font-semibold text-text-primary">
+                          {providerDisplayName}
+                        </h3>
+                        {conn.provider === "tokenharbor" && (
+                          <TokenHarborUsageDetails details={quota?.raw?.tokenharbor} />
+                        )}
+                      </div>
                       {getConnectionLabel(conn) ? (
                         <p className="text-xs text-text-muted truncate">
                           {getConnectionLabel(conn)}
@@ -1432,12 +1436,6 @@ export default function ProviderLimits() {
                       }
                       onHideQuota={(quotaRow) => handleHideQuota(conn.provider, quotaRow)}
                     />
-                    {conn.provider === "xingchi" && (
-                      <XingchiUsageDetails details={quota?.raw?.xingchi} />
-                    )}
-                    {conn.provider === "tokenharbor" && (
-                      <TokenHarborUsageDetails details={quota?.raw?.tokenharbor} />
-                    )}
                   </>
                 )}
                 {quota?.message && !error && !isLoading && (

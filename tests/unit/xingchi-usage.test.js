@@ -53,7 +53,13 @@ describe("getUsageForProvider(xingchi)", () => {
     const usage = await getUsageForProvider({ provider: "xingchi", authType: "apikey", apiKey: "  TEST-KEY  " });
     expect(usage.message).toBeUndefined();
     expect(usage.plan).toBe("钱包余额");
-    expect(usage.quotas["Balance (USD)"]).toMatchObject({ total: 299.997651, isCreditBalance: true, remainingPercentage: 100 });
+    expect(usage.quotas["Balance (USD)"]).toMatchObject({
+      total: 300,
+      used: 0.002349,
+      remainingAmount: 299.997651,
+      isWalletBalance: true,
+    });
+    expect(usage.quotas["Balance (USD)"].remainingPercentage).toBeCloseTo(99.999217, 5);
     expect(usage.xingchi).toMatchObject({
       balance: 299.997651, remaining: 299.997651, billingRate: 1,
       today: { requests: 3, totalTokens: 2277, actualCost: 0.002349 },
@@ -71,15 +77,19 @@ describe("getUsageForProvider(xingchi)", () => {
 
     const rows = parseQuotaData("xingchi", usage);
     expect(rows).toHaveLength(1);
-    expect(rows[0].isCreditBalance).toBe(true);
+    expect(rows[0].isCreditBalance).toBe(false);
+    expect(rows[0].isWalletBalance).toBe(true);
+    expect(rows[0].remainingAmount).toBe(299.997651);
     expect(rows[0].remaining).toBeUndefined();
-    expect(getRemainingPercentage(rows[0])).toBe(100);
+    // The shared integer helper remains unchanged for other providers; the
+    // wallet table row explicitly preserves the fractional percentage.
+    expect(rows[0].remainingPercentage).toBeCloseTo(99.999217, 5);
   });
 
   it("continues showing usage when optional billing returns 404", async () => {
     proxyAwareFetch.mockImplementation(async (url) => url === USAGE_URL ? respond(WALLET) : respond({}, 404));
     const usage = await getUsageForProvider({ provider: "xingchi", apiKey: "TEST-KEY" });
-    expect(usage.quotas["Balance (USD)"].total).toBe(299.997651);
+    expect(usage.quotas["Balance (USD)"].total).toBe(300);
     expect(usage.xingchi.billingRate).toBeNull();
   });
 
@@ -140,12 +150,33 @@ describe("Sub2API quota normalization", () => {
     expect(output.quotas["Balance (USD)"]).toBeUndefined();
   });
 
-  it("does not manufacture a total limit by adding balance to previous usage", () => {
+  it("calculates New API-style balance ratio using actual charges, not list-price cost", () => {
     const output = normalizeXingchiUsage(WALLET);
-    expect(output.quotas["Balance (USD)"].total).toBe(299.997651);
-    expect(output.quotas["Balance (USD)"].used).toBe(0);
+    expect(output.quotas["Balance (USD)"].total).toBe(300);
+    expect(output.quotas["Balance (USD)"].used).toBe(0.002349);
+    expect(output.quotas["Balance (USD)"].remainingAmount).toBe(299.997651);
+    expect(output.quotas["Balance (USD)"].remainingPercentage).toBeCloseTo(99.999217, 5);
     expect(output.xingchi.total.cost).toBe(0.004698);
     expect(output.xingchi.total.actualCost).toBe(0.002349);
+  });
+
+  it("does not fabricate a percentage bar when actual charged spending is missing", () => {
+    const output = normalizeXingchiUsage({
+      ...WALLET,
+      usage: { total: { requests: 2, cost: 0.25 } },
+    });
+    expect(output.quotas["Balance (USD)"]).toMatchObject({
+      total: 299.997651,
+      isCreditBalance: true,
+      remainingPercentage: 100,
+    });
+    expect(output.quotas["Balance (USD)"].isWalletBalance).toBeUndefined();
+  });
+
+  it("shows depleted wallet as 0% with real recorded charges", () => {
+    const output = normalizeXingchiUsage({ ...WALLET, balance: 0 });
+    expect(output.quotas["Balance (USD)"].remainingPercentage).toBe(0);
+    expect(output.quotas["Balance (USD)"].total).toBe(0.002349);
   });
 
   it("ignores malformed usage instead of producing false zero-value limits", () => {

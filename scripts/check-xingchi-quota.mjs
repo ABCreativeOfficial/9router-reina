@@ -13,7 +13,10 @@ assert.equal(provider.features?.usageApikey, true);
 const data = {
   isValid: true, mode: "unrestricted", planName: "钱包余额", unit: "USD",
   balance: 299.997651, remaining: 299.997651,
-  usage: { today: { requests: 3, total_tokens: 2277, cost: 0.004698, actual_cost: 0.002349 } },
+  usage: {
+    today: { requests: 3, total_tokens: 2277, cost: 0.004698, actual_cost: 0.002349 },
+    total: { requests: 3, total_tokens: 2277, cost: 0.004698, actual_cost: 0.002349 },
+  },
 };
 const billing = { object: "sub2api.key_billing", billing_scope: "token", effective_rate_multiplier: 1 };
 const calls = [];
@@ -25,8 +28,11 @@ const result = await getXingchiUsage("  TEST-ONLY-KEY ", null, mock);
 assert.equal(calls.length, 2);
 assert.equal(calls[0].options.headers.Authorization, "Bearer TEST-ONLY-KEY");
 assert.equal(calls[1].options.headers.Authorization, "Bearer TEST-ONLY-KEY");
-assert.equal(result.quotas["Balance (USD)"].total, 299.997651);
-assert.equal(result.quotas["Balance (USD)"].isCreditBalance, true);
+assert.equal(result.quotas["Balance (USD)"].total, 300);
+assert.equal(result.quotas["Balance (USD)"].used, 0.002349);
+assert.equal(result.quotas["Balance (USD)"].remainingAmount, 299.997651);
+assert.equal(result.quotas["Balance (USD)"].isWalletBalance, true);
+assert.ok(Math.abs(result.quotas["Balance (USD)"].remainingPercentage - 99.999217) < 0.000001);
 assert.equal(result.xingchi.today.actualCost, 0.002349);
 assert.equal(result.xingchi.billingRate, 1);
 
@@ -56,7 +62,10 @@ const rate = normalizeXingchiUsage({
 assert.equal(rate.quotas["Rate limit (5h)"].resetAt, "2026-11-21T00:00:00.000Z");
 
 const ui = readFileSync(fileURLToPath(new URL("../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js", import.meta.url)), "utf8");
-assert.match(ui, /<XingchiUsageDetails details=\{quota\?\.raw\?\.xingchi\}/);
+assert.doesNotMatch(ui, /<XingchiUsageDetails details=/);
+const table = readFileSync(fileURLToPath(new URL("../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/QuotaTable.js", import.meta.url)), "utf8");
+assert.match(table, /remainingAmount/);
+assert.match(table, /formatWalletAmount/);
 const parser = readFileSync(fileURLToPath(new URL("../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js", import.meta.url)), "utf8");
 assert.match(parser, /case "xingchi":/);
 

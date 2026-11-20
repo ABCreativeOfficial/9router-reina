@@ -48,6 +48,10 @@ assert.equal(idle.quotas["Free models (7d)"].resetAt, null);
 
 const ui = readFileSync(fileURLToPath(new URL("../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/index.js", import.meta.url)), "utf8");
 assert.match(ui, /<TokenHarborUsageDetails details=\{quota\?\.raw\?\.tokenharbor\}/);
+assert.ok(ui.indexOf("<TokenHarborUsageDetails") < ui.indexOf("<QuotaTable"), "status icon is in header, not footer");
+const statusIcon = readFileSync(fileURLToPath(new URL("../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/TokenHarborUsageDetails.js", import.meta.url)), "utf8");
+assert.match(statusIcon, /aria-label=\{status.label\}/);
+assert.doesNotMatch(statusIcon, /requestsUsed|models\.map|<details/);
 const parser = readFileSync(fileURLToPath(new URL("../src/app/(dashboard)/dashboard/usage/components/ProviderLimits/utils.js", import.meta.url)), "utf8");
 assert.match(parser, /case "tokenharbor":/);
 console.log("PASS: Token Harbor allowance endpoint, 84% remaining, Pass, reset, exhausted/disabled/idle states, dashboard wiring");
