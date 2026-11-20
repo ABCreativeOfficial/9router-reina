@@ -764,6 +764,27 @@ export function parseQuotaData(provider, data) {
         }
         break;
 
+      case "xingchi":
+        // Sub2API returns either wallet balance, fixed API-key quota,
+        // subscription windows or rate limits. The wallet is a credit row
+        // (not a finite progress bar). Never forward absolute `remaining`
+        // since QuotaTable interprets that property as a percentage.
+        if (data.quotas) {
+          Object.entries(data.quotas).forEach(([name, quota]) => {
+            normalizedQuotas.push({
+              name,
+              used: quota.used || 0,
+              total: quota.total || 0,
+              resetAt: quota.resetAt || null,
+              remainingPercentage: quota.remainingPercentage,
+              isCreditBalance: quota.isCreditBalance === true,
+              currency: quota.currency,
+              unit: quota.unit,
+            });
+          });
+        }
+        break;
+
       case "cursor":
         // Plan spend is USD (cents from GetCurrentPeriodUsage). Forward
         // remainingPercentage only — do not pass absolute remaining (UI treats it as %).
