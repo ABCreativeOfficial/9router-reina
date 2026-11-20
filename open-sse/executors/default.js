@@ -113,6 +113,13 @@ export class DefaultExecutor extends BaseExecutor {
         delete transformed.client_metadata;
       }
       stripUnsupportedParams(this.provider, model, transformed);
+      // Some authorized Responses gateways require stateless requests, like a
+      // Codex CLI configured with disable_response_storage=true. Honor the
+      // provider's opt-in even when the incoming body already uses Responses.
+      if (this.config.quirks?.disableResponseStorage) {
+        if (transformed === body) transformed = { ...transformed };
+        transformed.store = false;
+      }
     }
 
     return injectReasoningContent({ provider: this.provider, model, body: transformed });

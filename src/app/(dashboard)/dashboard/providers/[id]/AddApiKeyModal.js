@@ -8,10 +8,18 @@ import { planBulkAdd } from "@/shared/utils/bulkAdd";
 
 const BULK_PLACEHOLDER = `name1|sk-key1\nname2|sk-key2\nsk-key-only-auto-named`;
 
+function nextXingchiConnectionName(existingNames = []) {
+  const taken = new Set(existingNames);
+  let number = 1;
+  while (taken.has(`Xingchi Key ${number}`)) number++;
+  return `Xingchi Key ${number}`;
+}
+
 export default function AddApiKeyModal({ isOpen, provider, providerName, isCompatible, isAnthropic, authType, authHint, website, proxyPools, error, existingNames, onSave, onBulkDone, onClose }) {
   const NONE_PROXY_POOL_VALUE = "__none__";
   const isOllamaLocal = provider === "ollama-local";
   const isCookie = authType === "cookie";
+  const isXingchi = provider === "xingchi";
   const isXaiApiKey = provider === "xai" && !isCookie;
   const credentialLabel = isCookie ? "Cookie Value" : provider === "qoder" || provider === "qoder-cn" ? "Personal Access Token (PAT)" : "API Key";
   const credentialPlaceholder = isCookie
@@ -151,7 +159,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   const handleSubmit = async () => {
     if (!provider) return;
     if (!isOllamaLocal && !apiKeySatisfied()) return;
-    if (!isOllamaLocal) {
+    if (!isOllamaLocal && !isXingchi) {
       // Non-ollama providers require a name
       if (!formData.name) return;
     }
@@ -178,7 +186,7 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
       }
 
       await onSave({
-        name: formData.name || (isOllamaLocal ? "Ollama Local" : ""),
+        name: isXingchi ? nextXingchiConnectionName(existingNames) : (formData.name || (isOllamaLocal ? "Ollama Local" : "")),
         apiKey: formData.apiKey,
         defaultModel: isCompatible ? formData.defaultModel.trim() : undefined,
         priority: formData.priority,
@@ -250,14 +258,14 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
       <div className="flex flex-col gap-4">
         {/* Mode switcher. Hidden for AWS credentials: bulk lines carry only a key, so a
             Bedrock entry would be saved with no access key id or profile and never work. */}
-        {!usesAwsCredentialForm && (
+        {!usesAwsCredentialForm && !isXingchi && (
           <div className="flex gap-2">
             <Button size="sm" variant={mode === "single" ? "primary" : "ghost"} onClick={() => { setMode("single"); setBulkResult(null); }}>Single</Button>
             <Button size="sm" variant={mode === "bulk" ? "primary" : "ghost"} onClick={() => { setMode("bulk"); setBulkResult(null); }}>Bulk Add</Button>
           </div>
         )}
 
-        {mode === "bulk" && (
+        {mode === "bulk" && !isXingchi && (
           <div className="flex flex-col gap-3">
             <p className="text-xs text-text-muted">
               {isCloudflareAi
@@ -287,13 +295,15 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </div>
         )}
 
-        {mode === "single" && (<>
+        {(mode === "single" || isXingchi) && (<>
+        {!isXingchi && (
         <Input
           label="Name"
           value={formData.name}
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           placeholder={isOllamaLocal ? "Ollama Local" : "Production Key"}
         />
+        )}
         {isOllamaLocal && (
           <div className="flex gap-2">
             <Input
@@ -343,6 +353,11 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
               </Button>
             </div>
           </div>
+        )}
+        {isXingchi && (
+          <p className="text-xs text-text-muted">
+            Responses streaming and model discovery are configured automatically. A unique connection name will be created for this key.
+          </p>
         )}
         {isXaiApiKey && (
           <p className="text-xs text-text-muted">
@@ -485,36 +500,38 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
           </div>
         )}
 
-        <Input
-          label="Priority"
-          type="number"
-          value={formData.priority}
-          onChange={(e) => setFormData({ ...formData, priority: Number.parseInt(e.target.value) || 1 })}
-        />
+        {!isXingchi && (<>
+          <Input
+            label="Priority"
+            type="number"
+            value={formData.priority}
+            onChange={(e) => setFormData({ ...formData, priority: Number.parseInt(e.target.value) || 1 })}
+          />
 
-        <Select
-          label="Proxy Pool"
-          value={formData.proxyPoolId}
-          onChange={(e) => setFormData({ ...formData, proxyPoolId: e.target.value })}
-          options={[
-            { value: NONE_PROXY_POOL_VALUE, label: "None" },
-            ...(proxyPools || []).map((pool) => ({ value: pool.id, label: pool.name })),
-          ]}
-          placeholder="None"
-        />
+          <Select
+            label="Proxy Pool"
+            value={formData.proxyPoolId}
+            onChange={(e) => setFormData({ ...formData, proxyPoolId: e.target.value })}
+            options={[
+              { value: NONE_PROXY_POOL_VALUE, label: "None" },
+              ...(proxyPools || []).map((pool) => ({ value: pool.id, label: pool.name })),
+            ]}
+            placeholder="None"
+          />
 
-        {(proxyPools || []).length === 0 && (
+          {(proxyPools || []).length === 0 && (
+            <p className="text-xs text-text-muted">
+              No active proxy pools available. Create one in Proxy Pools page first.
+            </p>
+          )}
+
           <p className="text-xs text-text-muted">
-            No active proxy pools available. Create one in Proxy Pools page first.
+            Legacy manual proxy fields are still accepted by API for backward compatibility.
           </p>
-        )}
-
-        <p className="text-xs text-text-muted">
-          Legacy manual proxy fields are still accepted by API for backward compatibility.
-        </p>
+        </>)}
 
         <div className="flex gap-2">
-          <Button onClick={handleSubmit} fullWidth disabled={saving || (!isOllamaLocal && (!formData.name || !apiKeySatisfied())) || (isCompatible && !formData.defaultModel.trim()) || (isAzure && (!azureData.azureEndpoint || !azureData.deployment || !azureData.organization)) || (isCloudflareAi && !cloudflareData.accountId)}>
+          <Button onClick={handleSubmit} fullWidth disabled={saving || (!isOllamaLocal && ((!isXingchi && !formData.name) || !apiKeySatisfied())) || (isCompatible && !formData.defaultModel.trim()) || (isAzure && (!azureData.azureEndpoint || !azureData.deployment || !azureData.organization)) || (isCloudflareAi && !cloudflareData.accountId)}>
             {saving ? "Saving..." : "Save"}
           </Button>
           <Button onClick={onClose} variant="ghost" fullWidth>

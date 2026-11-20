@@ -293,6 +293,25 @@ export async function POST(request) {
           isValid = openaiRes.ok;
           break;
 
+        case "xingchi": {
+          // A read-only catalog request checks the supplied key without
+          // spending inference tokens or imitating a first-party client.
+          const res = await fetch(PROVIDERS.xingchi.validateUrl, {
+            headers: {
+              "Authorization": `Bearer ${apiKey}`,
+              ...PROVIDERS.xingchi.headers,
+            },
+            signal: AbortSignal.timeout(8000),
+          });
+          isValid = res.ok;
+          if (!isValid) {
+            error = res.status === 403
+              ? "Xingchi rejected this client or key (403); check integration permission"
+              : `Xingchi validation returned HTTP ${res.status}`;
+          }
+          break;
+        }
+
         case "vercel-ai-gateway":
           const vercelAiGatewayRes = await fetch("https://ai-gateway.vercel.sh/v1/models", {
             headers: { "Authorization": `Bearer ${apiKey}` },

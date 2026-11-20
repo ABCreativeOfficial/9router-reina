@@ -3,7 +3,7 @@ import { getProviderConnectionById } from "@/models";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
 import { GEMINI_CONFIG, ZED_HOSTED_CONFIG } from "@/lib/oauth/constants/oauth";
 import { refreshGoogleToken, refreshCodexToken, updateProviderCredentials } from "@/sse/services/tokenRefresh";
-import { resolveOllamaLocalHost } from "open-sse/config/providers.js";
+import { PROVIDERS, resolveOllamaLocalHost } from "open-sse/config/providers.js";
 import { getModelsByProviderId } from "open-sse/config/providerModels.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
@@ -250,6 +250,13 @@ const PROVIDER_MODELS_CONFIG = {
     }
   },
   openai: createOpenAIModelsConfig("https://api.openai.com/v1/models"),
+  xingchi: {
+    ...createOpenAIModelsConfig(PROVIDERS.xingchi.validateUrl),
+    headers: {
+      "Content-Type": "application/json",
+      ...PROVIDERS.xingchi.headers,
+    },
+  },
   openrouter: createOpenAIModelsConfig("https://openrouter.ai/api/v1/models"),
   nous: {
     ...createOpenAIModelsConfig(NOUS_MODELS_URL),
