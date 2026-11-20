@@ -20,6 +20,7 @@ import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import { resolveNewApiConnectionModels } from "@/sse/services/newApiModels";
 import { resolveCodexLiveModels } from "open-sse/services/codexModelDiscovery.js";
+import { resolveXingchiModels } from "open-sse/services/xingchiModels.js";
 
 /**
  * Fill in what the provider omitted, in the field names the pickers already read.
@@ -300,10 +301,9 @@ const PROVIDER_MODELS_CONFIG = {
   },
   openai: createOpenAIModelsConfig("https://api.openai.com/v1/models"),
   xingchi: {
-    ...createOpenAIModelsConfig(PROVIDERS.xingchi.validateUrl),
-    headers: {
-      "Content-Type": "application/json",
-      ...PROVIDERS.xingchi.headers,
+    customResolver: async (connection, { forceRefresh = false } = {}) => {
+      const proxy = await resolveConnectionProxyConfig(connection.providerSpecificData || {});
+      return resolveXingchiModels(connection, { forceRefresh, proxyOptions: proxy });
     },
   },
   openrouter: createOpenAIModelsConfig("https://openrouter.ai/api/v1/models"),
@@ -714,7 +714,9 @@ export async function GET(request, { params }) {
 
     // Config-driven custom resolver path (OAuth refresh, non-OpenAI shape, etc.)
     if (typeof config.customResolver === "function") {
-      const result = await config.customResolver(connection);
+      const forceRefresh = connection.provider === "xingchi"
+        && new URL(request.url).searchParams.get("refresh") === "1";
+      const result = await config.customResolver(connection, { forceRefresh });
       if (result.error) {
         return NextResponse.json({ error: result.error }, { status: result.status || 500 });
       }

@@ -18,6 +18,9 @@ const ICON_ALIASES = {
   "chatgpt-web": "openai",
 };
 
+// SVG-only provider marks must not be requested as PNGs (which would 404).
+const ICON_EXTENSIONS = { xingchi: "svg" };
+
 // Runtime only — first 404 remembers id for the whole session
 const failedIds = new Set();
 
@@ -36,10 +39,10 @@ export function resolveProviderIconId(providerId) {
   return aliased;
 }
 
-/** `/providers/{id}.png` or null when previously failed. */
+/** `/providers/{id}.{png|svg}` or null when previously failed. */
 export function getProviderIconSrc(providerId) {
   const id = resolveProviderIconId(providerId);
-  return id ? `/providers/${id}.png` : null;
+  return id ? `/providers/${id}.${ICON_EXTENSIONS[id] || "png"}` : null;
 }
 
 /** Call from img onError so later mounts skip the request. */

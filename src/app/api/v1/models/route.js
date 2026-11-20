@@ -23,6 +23,7 @@ import { resolveNewApiConnectionModels } from "@/sse/services/newApiModels";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { resolveCommandCodeModels } from "open-sse/services/commandcodeModels.js";
 import { resolveCodexLiveModels } from "open-sse/services/codexModelDiscovery.js";
+import { resolveXingchiModels } from "open-sse/services/xingchiModels.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel, aggregateComboCapabilities } from "open-sse/providers/capabilities.js";
@@ -108,6 +109,11 @@ const LIVE_MODEL_RESOLVERS = {
     } catch {
       return null;
     }
+  xingchi: async (conn) => {
+    const proxy = await resolveConnectionProxyConfig(conn.providerSpecificData || {});
+    const result = await resolveXingchiModels(conn, { proxyOptions: proxy });
+    return result.models.length ? { models: result.models } : null;
+  },
   codex: async (conn) => {
     const result = await resolveCodexLiveModels(conn);
     return result.models.length ? { models: result.models } : null;
@@ -593,7 +599,7 @@ export async function buildModelsList(kindFilter, options = {}) {
                 })
               )
             : !hasExplicitEnabledModels
-              ? providerId === "codex"
+              ? providerId === "codex" || providerId === "xingchi"
                 ? await Promise.all(
                     (activeConnectionsByProvider.get(providerId) || [conn]).map(async (candidate) => {
                       const live = await liveResolver(candidate);
@@ -615,6 +621,7 @@ export async function buildModelsList(kindFilter, options = {}) {
               ? providerModels.filter((model) => modelKind(model) !== LLM_KIND)
               : [];
             rawModelIds = [...new Set([
+              ...(providerId === "xingchi" ? rawModelIds : []),
               ...liveModels.map((m) => m.id), ...codexMedia.map((m) => m.id),
             ])];
             liveModelKindById = new Map(liveModels.map((m) => [m.id, modelKind(m)]));

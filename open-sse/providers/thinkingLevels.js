@@ -135,6 +135,14 @@ const isOpenAICompatibleNode = (provider) => String(provider || "").startsWith("
 export function getThinkingLevels(provider, model) {
   const normalizedProvider = provider === "ag" ? "antigravity" : provider;
   if (normalizedProvider === "kiro" && resolveKiroEffortPath(model) === null) return null;
+  // Xingchi's curated seed models carry their exact OpenCode-style variant
+  // options. In particular, newer Sol/Astra variants permit max, whereas
+  // smaller Codex/GPT-5.x entries do not. Avoid applying the generic GPT list.
+  if (normalizedProvider === "xingchi") {
+    const xingchiBase = typeof model === "string" ? model.replace(/\([^()]+\)\s*$/, "").trim() : model;
+    const entry = getProviderModels("xc").find((candidate) => candidate.id === xingchiBase);
+    if (Array.isArray(entry?.reasoning) && entry.reasoning.length) return entry.reasoning;
+  }
   // Codex reasoning sets are per model in the official catalog, so they win over
   // any family pattern; the alias prefix ("cx/") and a "(level)" suffix are stripped first.
   if (normalizedProvider === "codex") {

@@ -18,6 +18,7 @@ import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { applyQoderModelNames, getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import { buildProviderModelCatalog } from "@/shared/utils/providerModelCatalog";
+import { mergeXingchiModelCatalog } from "@/shared/utils/xingchiModelCatalog";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -92,8 +93,9 @@ export default function ProviderDetailPage() {
   const [scheduleConnection, setScheduleConnection] = useState(null);
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
-  // Live-catalog fetch warning/error (surfaced for zed only; cursor behavior unchanged).
+  // Live-catalog warning/error (Zed and Xingchi; cursor behavior unchanged).
   const [liveModelsError, setLiveModelsError] = useState(null);
+  const [refreshingXingchiModels, setRefreshingXingchiModels] = useState(false);
   const [liveModelsByConnection, setLiveModelsByConnection] = useState({});
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
@@ -197,10 +199,13 @@ export default function ProviderDetailPage() {
   // origin is read from the provider node because each deployment is user-created.
   const isNewApiProvider = providerNode?.family === NEW_API_FAMILY;
   const newApiOrigin = isNewApiProvider ? (providerNode.newApi?.origin || "") : "";
-  // Upstream's live-catalog set (cursor, zed, claude, commandcode) is live-only too.
+  // Some providers replace the registry with live models; Xingchi merges both.
   const perAccountLiveModels = isNewApiProvider || LIVE_MODEL_CATALOG_PROVIDERS.has(providerId);
-  const models = perAccountLiveModels && liveModels.length > 0
-    ? liveModels
+  const effectiveLiveModels = providerId === "xingchi"
+    ? mergeXingchiModelCatalog(staticModels, liveModels)
+    : liveModels;
+  const models = perAccountLiveModels && effectiveLiveModels.length > 0
+    ? effectiveLiveModels
     : applyQoderModelNames(staticModels, customModels, getProviderAlias(providerId));
   const providerAlias = getProviderAlias(providerId);
   
@@ -265,7 +270,7 @@ export default function ProviderDetailPage() {
   // Model Access modal, so the two lists cannot drift apart.
   const modelCatalog = buildProviderModelCatalog({
     staticModels,
-    liveModels,
+    liveModels: effectiveLiveModels,
     preferLiveModels: perAccountLiveModels,
     kiloFreeModels,
     customModels,
@@ -281,8 +286,8 @@ export default function ProviderDetailPage() {
     liveModels: isNewApiProvider && selectedConnection?.id
       ? (liveModelsByConnection[selectedConnection.id]?.length
         ? liveModelsByConnection[selectedConnection.id]
-        : liveModels)
-      : liveModels,
+        : effectiveLiveModels)
+      : effectiveLiveModels,
     preferLiveModels: perAccountLiveModels,
     kiloFreeModels,
     customModels,
@@ -605,35 +610,52 @@ export default function ProviderDetailPage() {
     const connection = activeConnections[0];
     if (!connection?.id) {
       setLiveModels([]);
-      if (providerId === "zed") setLiveModelsError(null);
+      if (providerId === "zed" || providerId === "xingchi") setLiveModelsError(null);
       return;
     }
 
     let cancelled = false;
-    if (providerId === "zed") setLiveModelsError(null);
+    if (providerId === "zed" || providerId === "xingchi") setLiveModelsError(null);
     fetch(`/api/providers/${connection.id}/models`, { cache: "no-store" })
       .then(async (res) => ({ ok: res.ok, data: await res.json().catch(() => null) }))
       .then(({ ok, data }) => {
         if (cancelled) return;
         if (ok && Array.isArray(data?.models) && data.models.length > 0) {
-          setLiveModels(data.models);
-          if (providerId === "zed" && data?.warning) setLiveModelsError(data.warning);
+          setLiveModels(providerId === "xingchi" ? data.models.filter((model) => model?.id) : data.models);
+          if ((providerId === "zed" || providerId === "xingchi") && data?.warning) setLiveModelsError(data.warning);
           return;
         }
-        if (providerId === "zed") {
+        if (providerId === "zed" || providerId === "xingchi") {
           setLiveModels([]);
-          setLiveModelsError(data?.warning || data?.error || "Zed returned no live models.");
+          setLiveModelsError(data?.warning || data?.error || `${providerId} returned no live models; using built-in models.`);
         }
       })
       .catch(() => {
-        if (!cancelled && providerId === "zed") {
+        if (!cancelled && (providerId === "zed" || providerId === "xingchi")) {
           setLiveModels([]);
-          setLiveModelsError("Failed to reach the Zed model catalog.");
+          setLiveModelsError(`Failed to reach the ${providerId} model catalog; using built-in models.`);
         }
       });
 
     return () => { cancelled = true; };
   }, [perAccountLiveModels, isNewApiProvider, connections]);
+
+  const refreshXingchiModels = async () => {
+    const connection = connections.find((conn) => conn.isActive !== false);
+    if (!connection || refreshingXingchiModels) return;
+    setRefreshingXingchiModels(true);
+    try {
+      const res = await fetch(`/api/providers/${connection.id}/models?refresh=1`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setLiveModels(Array.isArray(data.models) ? data.models.filter((model) => model?.id) : []);
+      setLiveModelsError(data.warning || null);
+    } catch (error) {
+      setLiveModelsError(`${error.message}. Using existing or built-in models.`);
+    } finally {
+      setRefreshingXingchiModels(false);
+    }
+  };
 
   // Fetch suggested models from provider's public API (if configured)
   useEffect(() => {
@@ -686,12 +708,16 @@ export default function ProviderDetailPage() {
       if (res.ok) {
         await fetchCustomModels();
         if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+        return true;
       } else {
         const data = await res.json();
         alert(data.error || "Failed to add custom model");
+        return false;
       }
     } catch (error) {
       console.log("Error adding custom model:", error);
+      alert(error.message || "Failed to save custom model");
+      return false;
     }
   };
 
@@ -2024,6 +2050,11 @@ export default function ProviderDetailPage() {
             const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
             return (
               <div className="flex gap-2">
+                {providerId === "xingchi" && connections.some((conn) => conn.isActive !== false) && (
+                  <Button size="sm" variant="secondary" icon="refresh" onClick={refreshXingchiModels} disabled={refreshingXingchiModels}>
+                    {refreshingXingchiModels ? "Refreshing..." : "Refresh Models"}
+                  </Button>
+                )}
                 {disabledModelIds.length > 0 && (
                   <Button size="sm" variant="secondary" icon="restart_alt" onClick={handleEnableAll}>
                     Active All
@@ -2067,8 +2098,8 @@ export default function ProviderDetailPage() {
             })()}
           </div>
         )}
-        {providerId === "zed" && !!liveModelsError && (
-          <p className="text-xs text-red-500 mb-3 break-words">{liveModelsError}</p>
+        {(providerId === "zed" || providerId === "xingchi") && !!liveModelsError && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 mb-3 break-words">{liveModelsError}</p>
         )}
         {renderModelsSection()}
       </Card>
@@ -2191,8 +2222,8 @@ export default function ProviderDetailPage() {
           providerAlias={providerStorageAlias}
           providerDisplayAlias={providerDisplayAlias}
           onSave={async (modelId, type, caps, transport) => {
-            await handleAddCustomModel(modelId, type, providerStorageAlias, caps, transport);
-            setShowAddCustomModel(false);
+            const saved = await handleAddCustomModel(modelId, type, providerStorageAlias, caps, transport);
+            if (saved) setShowAddCustomModel(false);
           }}
           onClose={() => setShowAddCustomModel(false)}
         />
