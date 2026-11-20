@@ -37,11 +37,28 @@ export default {
     },
     quirks: { disableResponseStorage: true },
   },
-  // Offline seeds only. The dashboard fetches the account's live /v1/models
-  // catalog using its saved API key, so other supported ids need no source edit.
+  // Durable offline catalog provided for Xingchi: keep these models visible
+  // even when the upstream catalog is empty, partial, or temporarily offline.
+  // Live discoveries and user-added models are merged on the dashboard.
+  // Context/output limits and reasoning variants are catalog hints, not an
+  // assertion that every API-key group is entitled to use every model.
   models: [
-    { id: "gpt-6.1-sol", name: "GPT 6.1 Sol" },
-    { id: "gpt-6-astra", name: "GPT 6 Astra" },
+    { id: "gpt-6", name: "GPT-6 (Astra)", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-6-astra", name: "GPT-6 Astra", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-5.2", name: "GPT-5.2", contextWindow: 400000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh"] },
+    { id: "gpt-5.6", name: "GPT-5.6 (Sol)", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-6.1-terra", name: "GPT-6.1 Terra", contextWindow: 1050000, maxOutput: 128000, reasoning: ["none", "low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-6-sol", name: "GPT-6 Sol", contextWindow: 1050000, maxOutput: 128000, reasoning: ["none", "low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-6-luna", name: "GPT-6 Luna", contextWindow: 1050000, maxOutput: 128000, reasoning: ["none", "low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "gpt-5.5", name: "GPT-5.5", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh"] },
+    { id: "gpt-5.4", name: "GPT-5.4", contextWindow: 1050000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh"] },
+    { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", contextWindow: 400000, maxOutput: 128000, reasoning: ["low", "medium", "high", "xhigh"] },
+    { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", contextWindow: 128000, maxOutput: 32000, reasoning: ["low", "medium", "high", "xhigh"] },
+    { id: "codex-mini-latest", name: "Codex Mini", contextWindow: 200000, maxOutput: 100000, reasoning: ["low", "medium", "high"] },
   ],
   passthroughModels: true,
 };

@@ -4,6 +4,7 @@ import { getCapabilitiesForModel } from "./capabilities.js";
 import { matchPattern } from "./pricing.js";
 import { resolveKiroEffortPath } from "../config/kiroConstants.js";
 import { getCodexModelCapabilities, matchCodexBaseModel } from "../config/codexModels.js";
+import { getProviderModels } from "../config/providerModels.js";
 
 // Shared level sets (deduped) — verified against provider docs + wire in thinkingUnified.applyFormat.
 const L = {
@@ -123,6 +124,14 @@ const isOpenAICompatibleNode = (provider) => String(provider || "").startsWith("
 // Returns valid thinking levels for a model, or null when the model has no reasoning.
 export function getThinkingLevels(provider, model) {
   if (provider === "kiro" && resolveKiroEffortPath(model) === null) return null;
+  // Xingchi's curated seed models carry their exact OpenCode-style variant
+  // options. In particular, newer Sol/Astra variants permit max, whereas
+  // smaller Codex/GPT-5.x entries do not. Avoid applying the generic GPT list.
+  if (provider === "xingchi") {
+    const baseId = typeof model === "string" ? model.replace(/\([^()]+\)\s*$/, "").trim() : model;
+    const entry = getProviderModels("xc").find((candidate) => candidate.id === baseId);
+    if (Array.isArray(entry?.reasoning) && entry.reasoning.length) return entry.reasoning;
+  }
   // Codex reasoning sets are per model in the official catalog (Luna stops at
   // `max`, GPT-5.5 at `xhigh`), so they come from the shared capability map
   // instead of a broad family pattern that would flatten them together.
