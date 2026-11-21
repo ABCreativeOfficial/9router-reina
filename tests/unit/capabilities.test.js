@@ -30,7 +30,9 @@ describe("getCapabilitiesForModel", () => {
   };
 
   const kiroGpt56Expected = {
-    contextWindow: 272000,
+    // https://kiro.dev/docs/models.md: GPT-5.6 tiers ship a 1M window. 272K is
+    // the two-tier *billing* threshold, not the context ceiling.
+    contextWindow: 1000000,
     maxOutput: 128000,
     thinkingFormat: "openai",
     reasoning: true,
@@ -73,7 +75,7 @@ describe("getCapabilitiesForModel", () => {
     expect(getCapabilitiesForModel("kiro", "claude-sonnet-5-thinking-agentic")).toMatchObject(claudeSonnet5Expected);
   });
 
-  it("reports Kiro GPT 5.6 models with the Kiro 272k context window", () => {
+  it("reports Kiro GPT 5.6 models with the 1M context window Kiro documents", () => {
     expect(getCapabilitiesForModel("kiro", "gpt-5.6-sol")).toMatchObject(kiroGpt56Expected);
     expect(getCapabilitiesForModel("kiro", "openai/gpt-5.6-sol")).toMatchObject(kiroGpt56Expected);
     expect(getCapabilitiesForModel("kiro", "gpt-5.6-terra-thinking")).toMatchObject(kiroGpt56Expected);

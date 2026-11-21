@@ -16,6 +16,8 @@ import {
   canonicalKiroUrl,
   isKiroRuntimeSurface,
   resolveKiroModel,
+  KIRO_THINKING_OPEN_TAG,
+  KIRO_THINKING_CLOSE_TAG,
 } from "../config/kiroConstants.js";
 import { v4 as uuidv4 } from "uuid";
 import { refreshKiroToken } from "../services/tokenRefresh.js";
@@ -956,17 +958,23 @@ export class KiroExecutor extends BaseExecutor {
           if (end < 0) content = "";
           else {
             state.inThinking = false;
-            content = content.slice(end + 11).replace(/^\n/u, "");
+            // The upstream opens the thinking block with the one-character
+            // shorter "<thinking>" but closes it with "</thinking>", so the two
+            // literals are not the same length. Slicing by the open tag's
+            // length used to leave the trailing ">" behind on every turn.
+            content = content.slice(end + KIRO_THINKING_CLOSE_TAG.length).replace(/^\n/u, "");
           }
         } else {
-          const start = content.indexOf("<thinking>");
+          const start = content.indexOf(KIRO_THINKING_OPEN_TAG);
           if (start >= 0) {
-            const end = content.indexOf("</thinking>", start + 10);
+            const end = content.indexOf(KIRO_THINKING_CLOSE_TAG, start + 10);
             if (end < 0) {
               state.inThinking = true;
               content = content.slice(0, start);
             } else {
-              content = content.slice(0, start) + content.slice(end + 11).replace(/^\n/u, "");
+              content =
+                content.slice(0, start) +
+                content.slice(end + KIRO_THINKING_CLOSE_TAG.length).replace(/^\n/u, "");
             }
           }
         }

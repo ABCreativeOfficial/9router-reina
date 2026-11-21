@@ -245,7 +245,12 @@ export const MODEL_CAPABILITIES = {
   "tidepool-alpha-free":     { reasoning: true, thinkingFormat: "openai", contextWindow: 1048576, maxOutput: 131072 },
 };
 
-const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 272000, maxOutput: 128000 };
+// Kiro's own docs (https://kiro.dev/docs/models.md, read 2026-11-21) give every
+// GPT-5.6 tier a **1M** context window, with a two-tier *pricing* threshold at
+// 272K (requests above 272K are billed at double the listed rate). 272000 is the
+// billing boundary, not the window — the earlier value conflated the two and
+// under-reported the ceiling by ~3.7x.
+const KIRO_GPT_5_6_CAPABILITIES = { vision: true, reasoning: true, search: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 128000 };
 
 // Codex OAuth (ChatGPT backend) — per-model context window reported by upstream
 // (lower than OpenAI API's 1.05M). Sol differs from Terra/Luna. #2720
@@ -388,6 +393,18 @@ export const PROVIDER_CAPABILITIES = {
     "gpt-5.6-sol-thinking-agentic": KIRO_GPT_5_6_CAPABILITIES,
     "gpt-5.6-terra-thinking-agentic": KIRO_GPT_5_6_CAPABILITIES,
     "gpt-5.6-luna-thinking-agentic": KIRO_GPT_5_6_CAPABILITIES,
+
+    // Kiro-specific windows from https://kiro.dev/docs/models.md (read
+    // 2026-11-21). Without these the generic qwen / minimax family patterns win
+    // and report the model's own vendor ceiling, not what Kiro serves:
+    //   Qwen3 Coder Next 256K (generic pattern claims 1M)
+    //   MiniMax M2.5     200K (generic pattern claims 204800)
+    //   Claude Haiku 5.5 1M   (falls through to the 200K default)
+    "qwen3-coder-next": { vision: false, reasoning: true, thinkingFormat: "openai", contextWindow: 256000, maxOutput: 64000 },
+    "kimi-k3":          { vision: false, reasoning: true, thinkingFormat: "openai", contextWindow: 1000000, maxOutput: 64000 },
+    "MiniMax-M2.5":     { vision: false, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 64000 },
+    "minimax-m2.5":     { vision: false, reasoning: true, thinkingFormat: "openai", contextWindow: 200000, maxOutput: 64000 },
+    "claude-haiku-5.5": { vision: true, reasoning: true, thinkingFormat: "claude", contextWindow: 1000000, maxOutput: 64000 },
   },
   "devin-cli": {
     "gpt-5.4-high": DEVIN_CLI_GPT_CAPS,

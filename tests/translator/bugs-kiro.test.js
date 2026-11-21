@@ -51,8 +51,10 @@ describe("OpenAI → Kiro", () => {
   });
 
   // openai-to-kiro.js:309 — maxTokens hardcoded to 32000, ignores body.max_tokens
-  // KNOWN BUG
-  it.fails("respects client max_tokens", () => {
+  // Fixed: resolveKiroMaxTokens() forwards the client ceiling (clamped to what
+  // upstream was measured to accept). A pinned 32000 truncated the <thinking>
+  // block before its closing tag, leaking raw reasoning to the client.
+  it("respects client max_tokens", () => {
     const out = O2K({ max_tokens: 100, messages: [{ role: "user", content: "hi" }] });
     expect(out.inferenceConfig?.maxTokens, "client max_tokens ignored").toBe(100);
   });

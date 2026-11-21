@@ -122,7 +122,23 @@ function extractClaudeCodeSession(userId) {
 // Lowercase-key lookup for raw client headers
 function headerValue(headers, key) {
     if (!headers || typeof headers !== "object") return null;
-    return normalizeSessionId(headers[key] ?? headers[key.toLowerCase()]);
+    const direct = normalizeSessionId(headers[key] ?? headers[key.toLowerCase()]);
+    if (direct) return direct;
+    // HTTP header names are case-insensitive, but a plain object is not. Our own
+    // handleChat builds lowercase keys from request.headers.entries(), yet any
+    // caller that assembles clientRawRequest by hand — or a MITM/relay path that
+    // forwards the raw casing — presents `X-Claude-Code-Session-Id`. Without this
+    // scan the session was invisible, resolveSessionIdentity fell through to a
+    // fresh random id, and every turn of one conversation opened a new Kiro
+    // conversation with no replay continuity.
+    const wanted = key.toLowerCase();
+    for (const [name, value] of Object.entries(headers)) {
+        if (name.toLowerCase() === wanted) {
+            const hit = normalizeSessionId(value);
+            if (hit) return hit;
+        }
+    }
+    return null;
 }
 
 // Read client-provided session id from headers/body (no generation)

@@ -28,6 +28,7 @@ import {
   resolveDefaultProfileArn,
   buildKiroAdditionalModelRequestFieldsForModel,
   usesKiroNativeGptEffort,
+  resolveKiroMaxTokens,
 } from "../../config/kiroConstants.js";
 import { DEFAULT_IMAGE_MIME } from "../schema/index.js";
 import { ROLE, CLAUDE_BLOCK } from "../schema/index.js";
@@ -231,7 +232,7 @@ function extractClaudeSystemText(system) {
 export function claudeToKiroRequest(model, body, stream, credentials) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const tools = Array.isArray(body.tools) ? body.tools : [];
-  const maxTokens = body.max_tokens || 32000;
+  const maxTokens = resolveKiroMaxTokens(body);
   const temperature = body.temperature;
   const topP = body.top_p;
 

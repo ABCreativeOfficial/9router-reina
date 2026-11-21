@@ -87,11 +87,12 @@ describe("Kiro static provider models", () => {
       const model = models.get(id);
       const upstreamModelId = id.replace(/-(thinking-agentic|thinking|agentic)$/, "");
       expect(model).toMatchObject({
-        contextLength: 272000,
+        // https://kiro.dev/docs/models.md: 1M window; 272K is the billing tier.
+        contextLength: 1000000,
         rateMultiplier,
         upstreamModelId,
       });
-      expect(model.description).toContain("272k context window");
+      expect(model.description).toContain("1M context");
     }
   });
 });

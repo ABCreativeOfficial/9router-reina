@@ -15,7 +15,8 @@ import {
   KIRO_AGENTIC_SYSTEM_PROMPT,
   resolveDefaultProfileArn,
   buildKiroAdditionalModelRequestFieldsForModel,
-  usesKiroNativeGptEffort
+  usesKiroNativeGptEffort,
+  resolveKiroMaxTokens,
 } from "../../config/kiroConstants.js";
 import { parseDataUri } from "../concerns/image.js";
 import { DEFAULT_IMAGE_MIME } from "../schema/index.js";
@@ -308,7 +309,7 @@ function convertMessages(messages, model) {
 export function openaiToKiroRequest(model, body, stream, credentials) {
   const messages = body.messages || [];
   const tools = body.tools || [];
-  const maxTokens = 32000;
+  const maxTokens = resolveKiroMaxTokens(body);
   const temperature = body.temperature;
   const topP = body.top_p;
 

@@ -75,6 +75,50 @@ export const KIRO_ENDPOINT_FALLBACK_STATUSES = new Set([401, 403, 404]);
 // into the hostname that receives the bearer token.
 export const KIRO_RUNTIME_REGIONS = new Set(["us-east-1", "eu-central-1"]);
 
+// Measured against the live upstream (Kiro free tier, claude-sonnet-4.5) on
+// 2026-11-21. These are the numbers the service actually enforces, not the
+// Anthropic defaults:
+//
+//   input   : ~156k tokens accepted (ctx%=62.06), 312k rejected with
+//             400 CONTENT_LENGTH_EXCEEDS_THRESHOLD -> ~250k window.
+//             The `anthropic-beta: context-1m-*` header changes nothing; Kiro
+//             is not Anthropic and does not honour the 1M beta.
+//   output  : inferenceConfig.maxTokens up to 200000 was accepted unchanged.
+//
+// Context is capped at 200k (not 250k) because the harness reserves room for
+// output; the declared capability already calls 200000.
+export const KIRO_MEASURED_MAX_INPUT_TOKENS = 200000;
+export const KIRO_MEASURED_MAX_OUTPUT_TOKENS = 200000;
+
+// Previous hardcoded default. Kept as the floor for clients that send nothing.
+export const KIRO_DEFAULT_MAX_TOKENS = 32000;
+
+// Kiro opens reasoning with "<thinking>" and closes it with "</thinking>" — the
+// two literals differ in length by one, which is exactly the off-by-one that
+// left a stray ">" on the client's answer. Use the constants, never a magic
+// offset.
+export const KIRO_THINKING_OPEN_TAG = "<thinking>";
+export const KIRO_THINKING_CLOSE_TAG = "</thinking>";
+
+/**
+ * Resolve the `inferenceConfig.maxTokens` a translated request should carry.
+ *
+ * The client's own ceiling is authoritative when it is present and sane: a
+ * thinking turn spends output budget inside `<thinking>` before the answer, so
+ * pinning every request to 32000 truncated the reasoning block mid-sentence —
+ * the closing `</thinking>` never arrived, and the executor's stripper passed
+ * the raw tag through to the client. Clamped to what upstream was measured to
+ * accept so a hostile or mistaken client cannot ask for more.
+ *
+ * @param {object} body OpenAI- or Claude-shaped request body
+ * @returns {number}
+ */
+export function resolveKiroMaxTokens(body) {
+  const requested = Number(body?.max_tokens ?? body?.max_completion_tokens);
+  if (!Number.isFinite(requested) || requested <= 0) return KIRO_DEFAULT_MAX_TOKENS;
+  return Math.min(Math.floor(requested), KIRO_MEASURED_MAX_OUTPUT_TOKENS);
+}
+
 /** True for the awsJson1_0 KiroRuntime surface (runtime.*.kiro.dev). */
 export function isKiroRuntimeSurface(url) {
   return typeof url === "string" && /\/\/runtime\.[a-z0-9-]+\.kiro\.dev\//.test(url);
