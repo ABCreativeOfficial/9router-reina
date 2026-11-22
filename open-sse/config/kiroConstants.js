@@ -75,20 +75,28 @@ export const KIRO_ENDPOINT_FALLBACK_STATUSES = new Set([401, 403, 404]);
 // into the hostname that receives the bearer token.
 export const KIRO_RUNTIME_REGIONS = new Set(["us-east-1", "eu-central-1"]);
 
-// Measured against the live upstream (Kiro free tier, claude-sonnet-4.5) on
-// 2026-11-21. These are the numbers the service actually enforces, not the
-// Anthropic defaults:
+// Measured against the live upstream on 2026-11-21/22 with a real free-tier
+// account and NON-repetitive text (deterministic pseudo-random words, so the
+// tokenizer cannot compress it). These are what the service enforces:
 //
-//   input   : ~156k tokens accepted (ctx%=62.06), 312k rejected with
-//             400 CONTENT_LENGTH_EXCEEDS_THRESHOLD -> ~250k window.
-//             The `anthropic-beta: context-1m-*` header changes nothing; Kiro
-//             is not Anthropic and does not honour the 1M beta.
-//   output  : inferenceConfig.maxTokens up to 200000 was accepted unchanged.
-//
-// Context is capped at 200k (not 250k) because the harness reserves room for
-// output; the declared capability already calls 200000.
-export const KIRO_MEASURED_MAX_INPUT_TOKENS = 200000;
+//   input  : 210,600 tok accepted (ctx%=98.06); 216,000 tok rejected with
+//            400 CONTENT_LENGTH_EXCEEDS_THRESHOLD  ->  real window ~214,700.
+//            The `anthropic-beta: context-1m-*` header changes nothing; Kiro is
+//            not Anthropic and does not honour the 1M beta. `auto` has the same
+//            wall, despite the catalog advertising 1M for it.
+//            kiro.dev/docs/models.md still says 200K for Sonnet 4.5 — the docs
+//            are a floor, the observed wall is ~214.7k.
+//   output : inferenceConfig.maxTokens up to 200,000 accepted unchanged;
+//            ListAvailableModels reports maxOutputTokens 64,000 for every
+//            model this account can see.
+//   thinking: max_thinking_length 16,000..200,000 all accepted (200), and the
+//            resulting reasoning length is statistically unchanged (794 chars
+//            at 16k vs 499 at 200k) — the tag is advisory, not a budget. The
+//            old 32000 clamp was therefore not a correctness bug, but it also
+//            bought nothing. Raised to the measured ceiling.
+export const KIRO_MEASURED_MAX_INPUT_TOKENS = 210000;
 export const KIRO_MEASURED_MAX_OUTPUT_TOKENS = 200000;
+export const KIRO_THINKING_BUDGET_CEILING = 200000;
 
 // Previous hardcoded default. Kept as the floor for clients that send nothing.
 export const KIRO_DEFAULT_MAX_TOKENS = 32000;
@@ -556,7 +564,7 @@ export function resolveKiroModel(model) {
  * @param {number} [budget=KIRO_THINKING_BUDGET_DEFAULT]
  */
 export function buildThinkingSystemPrefix(budget = KIRO_THINKING_BUDGET_DEFAULT) {
-  const safeBudget = Math.max(1, Math.min(32000, Number(budget) || KIRO_THINKING_BUDGET_DEFAULT));
+  const safeBudget = Math.max(1, Math.min(KIRO_THINKING_BUDGET_CEILING, Number(budget) || KIRO_THINKING_BUDGET_DEFAULT));
   return `<thinking_mode>enabled</thinking_mode>\n<max_thinking_length>${safeBudget}</max_thinking_length>`;
 }
 

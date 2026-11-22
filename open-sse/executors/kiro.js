@@ -800,6 +800,7 @@ export class KiroExecutor extends BaseExecutor {
       usage: null,
       inThinking: false,
       toolValidationError: null,
+      refusal: null,
       validatedFrames: 0,
       finished: false
     };
@@ -818,6 +819,7 @@ export class KiroExecutor extends BaseExecutor {
             : "no_semantic_output",
       event_counts: { ...eventCounts },
       incomplete_frame_bytes: state.buffer.byteLength,
+      ...(state.refusal ? { refusal: state.refusal } : {}),
       ...overrides
     });
     const sseChunk = (delta, finishReason = null, usage) => encoder.encode(`data: ${JSON.stringify({
@@ -1031,6 +1033,21 @@ export class KiroExecutor extends BaseExecutor {
         state.stopReason = merged;
       } else if (eventType === "metadataEvent" || eventType === "MetadataEvent") {
         const metadata = event.payload?.metadataEvent || event.payload?.metadata || event.payload;
+        // Refusal metadata names the category, explains it, and can recommend a
+        // different model. It used to be dropped, so a refused turn surfaced only
+        // as "terminal_refusal" with no reason. Keep it for the diagnostics
+        // payload the client receives.
+        const details = metadata?.stopDetails ?? metadata?.stop_details;
+        const refusal = details?.refusal;
+        if (refusal && typeof refusal === "object") {
+          state.refusal = {
+            ...(typeof refusal.category === "string" ? { category: refusal.category } : {}),
+            ...(typeof refusal.explanation === "string" ? { explanation: refusal.explanation } : {}),
+            ...(typeof refusal.recommendedModel === "string"
+              ? { recommendedModel: refusal.recommendedModel }
+              : {}),
+          };
+        }
         const reason = normalizeStopReason(metadata?.stopReason ?? metadata?.stop_reason);
         if (reason) {
           state.explicitStop = true;

@@ -23,6 +23,14 @@ import { v4 as uuidv4 } from "uuid";
 import { createHash } from "node:crypto";
 import { refreshKiroToken } from "./tokenRefresh.js";
 import { buildKiroIdentityHeaders } from "../shared/kiroIdentity.js";
+import {
+  KIRO_MEASURED_MAX_INPUT_TOKENS,
+  KIRO_MEASURED_MAX_OUTPUT_TOKENS,
+} from "../config/kiroConstants.js";
+import REGISTRY from "../providers/registry/index.js";
+
+// Static Kiro catalog, used to fill gaps the per-account live catalog omits.
+const KIRO_REGISTRY_MODELS = REGISTRY.find((entry) => entry.id === "kiro")?.models || [];
 
 const DEFAULT_REGION = "us-east-1";
 const FETCH_TIMEOUT_MS = 30_000;
@@ -272,18 +280,54 @@ export async function resolveKiroModels(credentials, options = {}) {
     const upstreamId = m.modelId || m.id;
     if (!upstreamId) continue;
     const display = formatDisplayName(m.modelName, upstreamId, m.rateMultiplier);
-    const ctx = Number(m?.tokenLimits?.maxInputTokens) || 200_000;
+    // The live catalog advertises windows Kiro does not actually serve: `auto`
+    // claims 1,000,000 maxInputTokens, but a measured request of 216k tokens
+    // already comes back 400 CONTENT_LENGTH_EXCEEDS_THRESHOLD (~214.7k wall).
+    // Publishing the advertised number makes clients skip compaction and hard-
+    // fail upstream, so clamp to the measured ceiling.
+    const advertised = Number(m?.tokenLimits?.maxInputTokens) || 200_000;
+    const ctx = Math.min(advertised, KIRO_MEASURED_MAX_INPUT_TOKENS);
+    const maxOutput = Math.min(
+      Number(m?.tokenLimits?.maxOutputTokens) || KIRO_MEASURED_MAX_OUTPUT_TOKENS,
+      KIRO_MEASURED_MAX_OUTPUT_TOKENS
+    );
     for (const v of buildVariants(upstreamId, display)) {
       expanded.push({
         ...v,
         // Carry over context window + raw upstream metadata so the caller
         // (e.g. the dashboard models endpoint) can render it.
         contextLength: ctx,
+        maxOutput,
         rateMultiplier: Number.isFinite(Number(m.rateMultiplier)) ? Number(m.rateMultiplier) : 1.0,
         upstreamModelId: upstreamId,
         description: m.description || ""
       });
     }
+  }
+
+  // The live catalog is per-account and can be narrower than what the provider
+  // actually serves: a free account reports 8 upstream ids and omits `auto` and
+  // `claude-sonnet-4`, yet both are routable. Union the static registry in so a
+  // model that can serve a request is never hidden from /v1/models. Live entries
+  // win on conflict because their limits were just measured.
+  const seen = new Set(expanded.map((m) => m.id));
+  for (const model of KIRO_REGISTRY_MODELS) {
+    if (!model?.id || seen.has(model.id)) continue;
+    seen.add(model.id);
+    expanded.push({
+      id: model.id,
+      name: model.name,
+      capabilities: { thinking: false, agentic: false },
+      // Registry windows are the vendor-published numbers; never let them
+      // exceed the wall we measured, or a client will skip compaction and
+      // hard-fail upstream (gpt-5.6 advertises 1M, the wall is ~214.7k).
+      contextLength: Math.min(model.contextLength || KIRO_MEASURED_MAX_INPUT_TOKENS, KIRO_MEASURED_MAX_INPUT_TOKENS),
+      maxOutput: Math.min(model.maxOutput || KIRO_MEASURED_MAX_OUTPUT_TOKENS, KIRO_MEASURED_MAX_OUTPUT_TOKENS),
+      rateMultiplier: Number.isFinite(Number(model.rateMultiplier)) ? Number(model.rateMultiplier) : 1.0,
+      upstreamModelId: model.upstreamModelId || stripSyntheticSuffixes(model.id),
+      description: model.description || "",
+      catalogSource: "static"
+    });
   }
 
   catalogCache.set(key, {
