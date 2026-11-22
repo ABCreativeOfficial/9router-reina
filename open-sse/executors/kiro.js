@@ -28,6 +28,22 @@ import { AWS_EVENTSTREAM } from "../config/awsConstants.js";
 import { crc32, parseEventFrame } from "../utils/awsEventStream.js";
 import { buildKiroIdentityHeaders } from "../shared/kiroIdentity.js";
 import { finalizeKiroIdeHeaders, getKiroMachineId } from "../shared/kiroIdentity.js";
+import { continuitySettings } from "../continuity/config.js";
+import { readContinuityState, writeContinuityState } from "../continuity/stateStore.js";
+import { consumeTaggedThinking, flushTaggedThinking } from "../continuity/thinking.js";
+import { recordKiroContinuityResponse } from "../continuity/monitor.js";
+
+function rememberTextThinking(args, text) {
+  if (continuitySettings().mode !== "replay") return;
+  const state = args?.body?.conversationState;
+  const conversationId = state?.conversationId;
+  const modelId = state?.currentMessage?.userInputMessage?.modelId;
+  if (!conversationId || !modelId) return;
+  const key = `thinking:${args?.credentials?.connectionId || ""}:${conversationId}:${modelId}`;
+  // Overwrite old note with empty when new successful response has no thinking:
+  // stale scratchpad should not survive indefinitely into unrelated tasks.
+  writeContinuityState(key, { text: String(text || "").slice(-continuitySettings().thinkingChars) });
+}
 
 const KIRO_REPAIR_BUFFER_MAX_BYTES = 8 * 1024 * 1024;
 // Regions per service host; a region outside the set is never spliced into the hostname.
@@ -453,7 +469,8 @@ export class KiroExecutor extends BaseExecutor {
       // KIRO_INTEGRITY_GATE=off streams through, forfeiting the tool-call repair retry.
       if (process.env.KIRO_INTEGRITY_GATE === "off") {
         result.response = this.transformEventStreamToSSE(result.response, args.model, {
-          toolSpecs: args.body?.conversationState?.currentMessage?.userInputMessage?.userInputMessageContext?.tools || []
+          toolSpecs: args.body?.conversationState?.currentMessage?.userInputMessage?.userInputMessageContext?.tools || [],
+          onTaggedThinkingComplete: (text) => rememberTextThinking(args, text),
         });
       } else {
         this.attachIntegrityGate(result, args);
@@ -587,7 +604,10 @@ export class KiroExecutor extends BaseExecutor {
       options,
       "initial"
     );
-    if (first.kind === "complete") return first.bytes;
+    if (first.kind === "complete") {
+      rememberTextThinking(args, first.taggedThinking);
+      return first.bytes;
+    }
     if (first.kind === "terminal_stop" || first.kind === "upstream_error") {
       return this.integrityFailureSSE(first);
     }
@@ -632,7 +652,10 @@ export class KiroExecutor extends BaseExecutor {
       options,
       "retry"
     );
-    if (second.kind === "complete") return second.bytes;
+    if (second.kind === "complete") {
+      rememberTextThinking(args, second.taggedThinking);
+      return second.bytes;
+    }
     if (second.kind === "terminal_stop" || second.kind === "upstream_error") {
       return this.integrityFailureSSE(second);
     }
@@ -688,11 +711,13 @@ export class KiroExecutor extends BaseExecutor {
 
   async readIntegrityAttempt(rawResponse, model, options, attempt) {
     let diagnostics;
+    let taggedThinking = "";
     const transformed = this.transformEventStreamToSSE(rawResponse, model, {
       maxToolBytes: Math.max(1, Math.floor(options.maxBytes / 2)),
       onTerminalState: (value) => {
         diagnostics = value;
-      }
+      },
+      onTaggedThinkingComplete: (value) => { taggedThinking = value; },
     });
     const reader = transformed.body.getReader();
     const chunks = [];
@@ -769,7 +794,7 @@ export class KiroExecutor extends BaseExecutor {
         return { kind: "short_final", diagnostics: safeDiagnostics };
       }
     }
-    return { kind: "complete", bytes: concatChunks(chunks, totalBytes), diagnostics: safeDiagnostics };
+    return { kind: "complete", bytes: concatChunks(chunks, totalBytes), diagnostics: safeDiagnostics, taggedThinking };
   }
 
   transformEventStreamToSSE(response, model, options = {}) {
@@ -797,8 +822,11 @@ export class KiroExecutor extends BaseExecutor {
       contextUsagePercentage: 0,
       hasContextUsage: false,
       hasMetering: false,
+      hasMetrics: false,
       usage: null,
       inThinking: false,
+      thinkingRemainder: "",
+      thinkingCapture: "",
       toolValidationError: null,
       refusal: null,
       validatedFrames: 0,
@@ -954,32 +982,9 @@ export class KiroExecutor extends BaseExecutor {
       const eventCountKey = KIRO_EVENT_TYPES.has(eventType) ? eventType : "other";
       eventCounts[eventCountKey] = (eventCounts[eventCountKey] || 0) + 1;
       if (eventType === "assistantResponseEvent" && typeof event.payload?.content === "string") {
-        let content = event.payload.content;
-        if (state.inThinking) {
-          const end = content.indexOf("</thinking>");
-          if (end < 0) content = "";
-          else {
-            state.inThinking = false;
-            // The upstream opens the thinking block with the one-character
-            // shorter "<thinking>" but closes it with "</thinking>", so the two
-            // literals are not the same length. Slicing by the open tag's
-            // length used to leave the trailing ">" behind on every turn.
-            content = content.slice(end + KIRO_THINKING_CLOSE_TAG.length).replace(/^\n/u, "");
-          }
-        } else {
-          const start = content.indexOf(KIRO_THINKING_OPEN_TAG);
-          if (start >= 0) {
-            const end = content.indexOf(KIRO_THINKING_CLOSE_TAG, start + 10);
-            if (end < 0) {
-              state.inThinking = true;
-              content = content.slice(0, start);
-            } else {
-              content =
-                content.slice(0, start) +
-                content.slice(end + KIRO_THINKING_CLOSE_TAG.length).replace(/^\n/u, "");
-            }
-          }
-        }
+        // Consume real EventStream fragments, including markers split across
+        // multiple frames. Never emit the unsigned scratchpad to Claude Code.
+        let content = consumeTaggedThinking(state, event.payload.content, continuitySettings().mode === "replay" ? continuitySettings().thinkingChars : 0);
         if (content || !state.hasReasoning) {
           state.hasText ||= content.length > 0;
           state.totalContentLength += content.length;
@@ -1077,6 +1082,7 @@ export class KiroExecutor extends BaseExecutor {
         const prompt = Number(metrics.inputTokens) || 0;
         const completion = Number(metrics.outputTokens) || 0;
         if (prompt || completion) {
+          state.hasMetrics = true;
           state.usage = {
             ...(state.usage || {}),
             prompt_tokens: prompt,
@@ -1231,6 +1237,12 @@ export class KiroExecutor extends BaseExecutor {
         return;
       }
 
+      const trailingText = flushTaggedThinking(state);
+      if (trailingText) {
+        state.hasText = true;
+        state.totalContentLength += trailingText.length;
+        emitDelta(controller, { content: trailingText });
+      }
       const hasOutput = state.hasText || state.hasReasoning || state.hasCode || state.hasToolCalls;
       if (!hasOutput && !state.explicitStop) {
         fail(
@@ -1290,6 +1302,16 @@ export class KiroExecutor extends BaseExecutor {
       controller.enqueue(sseChunk({}, finishReason, state.usage));
       controller.enqueue(encoder.encode(SSE_DONE));
       state.finished = true;
+      // Never remember a scratchpad from a token-limited/partial completion.
+      if (finishReason === "stop" || finishReason === "tool_calls") {
+        options.onTaggedThinkingComplete?.(state.thinkingCapture);
+      }
+      recordKiroContinuityResponse({
+        contextUsagePercentage: state.hasContextUsage ? state.contextUsagePercentage : null,
+        providerTokens: state.hasMetrics ? (state.usage?.prompt_tokens ?? null) : null,
+        stopReason: state.stopReason || finishReason,
+        eventCounts,
+      });
       options.onTerminalState?.(diagnostics({
         terminal_provenance: state.terminalProvenance || "clean_eventstream_eof",
         transport_state: state.transportState,

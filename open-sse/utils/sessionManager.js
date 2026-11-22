@@ -10,6 +10,8 @@
 
 import crypto from "crypto";
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
+import { readContinuityState, writeContinuityState } from "../continuity/stateStore.js";
+import { continuitySettings } from "../continuity/config.js";
 
 // Runtime storage: Key = connectionId, Value = { sessionId, lastUsed }
 const runtimeSessionStore = new Map();
@@ -250,7 +252,11 @@ export function resolveContinuationId({ sessionId, connectionId, scope = "", eph
         continuationStore.set(key, existing);
         return existing.continuationId;
     }
-    const continuationId = crypto.randomUUID();
+    const remembered = continuitySettings().persist
+    ? readContinuityState(`continuation:${key}`)?.continuationId : null;
+    const continuationId = typeof remembered === "string" && /^[0-9a-f-]{36}$/i.test(remembered)
+    ? remembered : crypto.randomUUID();
+    if (continuitySettings().persist) writeContinuityState(`continuation:${key}`, { continuationId });
     if (continuationStore.size >= MAX_CONTINUATION_SESSIONS) {
         continuationStore.delete(continuationStore.keys().next().value);
     }

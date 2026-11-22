@@ -6,6 +6,8 @@ import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { v4 as uuidv4 } from "uuid";
 import { applyKiroSessionReplay } from "../../utils/kiroSessionReplay.js";
+import { continuitySettings } from "../../continuity/config.js";
+import { inspectContinuityRequest } from "../../continuity/monitor.js";
 import { resolveContinuationId, resolveSessionIdentity } from "../../utils/sessionManager.js";
 import {
   resolveKiroModelIntent,
@@ -446,6 +448,11 @@ export function openaiToKiroRequest(model, body, stream, credentials) {
     if (original !== sanitized) restoredToolNames.set(sanitized, original);
   }
   if (restoredToolNames.size) payload._toolNameMap = restoredToolNames;
+  const inspection = inspectContinuityRequest(payload, { sessionId: conversationId });
+  if (continuitySettings().strictGuard && inspection.status === "critical") {
+    console.error("[Kiro continuity] refusing over-budget history; compact before continuing");
+    return null;
+  }
   return payload;
 }
 

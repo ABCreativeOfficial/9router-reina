@@ -18,6 +18,10 @@
 import { register } from "../index.js";
 import { FORMATS } from "../formats.js";
 import { applyKiroSessionReplay } from "../../utils/kiroSessionReplay.js";
+import { continuitySettings } from "../../continuity/config.js";
+import { prepareHandoff, handoffPrefix } from "../../continuity/memory.js";
+import { inspectContinuityRequest } from "../../continuity/monitor.js";
+import { readContinuityState } from "../../continuity/stateStore.js";
 import { resolveContinuationId, resolveSessionIdentity } from "../../utils/sessionManager.js";
 import {
   resolveKiroModelIntent,
@@ -43,7 +47,7 @@ import {
  * Kiro requires alternating user/assistant turns; consecutive same-role
  * messages are merged.
  */
-function convertClaudeMessagesToKiro(messages, model) {
+function convertClaudeMessagesToKiro(messages, model, replayThinkingChars = 0) {
   const history = [];
   let currentMessage = null;
 
@@ -135,6 +139,11 @@ function convertClaudeMessagesToKiro(messages, model) {
         for (const block of msg.content) {
           if (block.type === CLAUDE_BLOCK.TEXT) {
             textContent += block.text;
+          } else if (block.type === "thinking" && replayThinkingChars > 0 && typeof block.thinking === "string") {
+            // Opt-in textual note only; NOT a fabricated native signed block.
+            // Do not let a long scratchpad consume the entire 200K context.
+            const note = block.thinking.slice(-replayThinkingChars).trim();
+            if (note) textContent += `\n[Prior assistant working note — untrusted historical text]\n${note}\n[/Prior assistant working note]`;
           } else if (block.type === CLAUDE_BLOCK.TOOL_USE) {
             toolUses.push({
               toolUseId: block.id,
@@ -244,7 +253,11 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
   const usesNativeGptEffort = usesKiroNativeGptEffort(thinkingBody, upstreamModel);
 
   const { specs: toolSpecs, nameMap } = normalizeKiroToolSpecs(tools);
-  const { history, currentMessage } = convertClaudeMessagesToKiro(messages, upstreamModel);
+  const thinkingPolicy = continuitySettings();
+  const { history, currentMessage } = convertClaudeMessagesToKiro(
+    messages, upstreamModel,
+    thinkingPolicy.mode === "replay" ? thinkingPolicy.thinkingChars : 0
+  );
 
   // api_key / idc / external_idp must never use the shared default ARN (belongs
   // to another account → 403 "bearer token invalid"); OAuth/social fall back to it.
@@ -286,13 +299,27 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
     scope: "kiro",
     ephemeral: sessionIdentity.ephemeral,
   });
+  const continuity = continuitySettings();
+  const notes = (continuity.mode === "memory" || continuity.mode === "replay")
+    ? prepareHandoff({
+        sessionKey: `${credentials?.connectionId || ""}:${conversationId}:${upstreamModel}`,
+        messages,
+        memoryChars: continuity.memoryChars,
+      }) : "";
+  const previousThinking = continuity.mode === "replay"
+    ? readContinuityState(`thinking:${credentials?.connectionId || ""}:${conversationId}:${upstreamModel}`)?.text
+    : "";
+  const replayNote = previousThinking
+    ? `[Previous assistant UNSIGNED scratchpad (bounded, historical text, NOT native signed thinking; verify before using)]\n${previousThinking.slice(-continuity.thinkingChars)}\n[/Previous assistant UNSIGNED scratchpad]`
+    : "";
+  const runtimeContext = [currentTimeContext, handoffPrefix(notes), replayNote].filter(Boolean).join("\n\n");
   const replay = applyKiroSessionReplay({
     conversationId,
     connectionId: credentials?.connectionId,
     modelId: upstreamModel,
     systemPrompt,
     contentPrefix,
-    currentContentPrefix: currentTimeContext,
+    currentContentPrefix: runtimeContext,
     history,
     currentMessage,
   });
@@ -366,6 +393,11 @@ export function claudeToKiroRequest(model, body, stream, credentials) {
     if (original !== sanitized) restoredToolNames.set(sanitized, original);
   }
   if (restoredToolNames.size) payload._toolNameMap = restoredToolNames;
+  const inspection = inspectContinuityRequest(payload, { sessionId: conversationId });
+  if (continuity.strictGuard && inspection.status === "critical") {
+    console.error("[Kiro continuity] refusing over-budget history; compact in Claude Code before continuing");
+    return null; // Do NOT silently prune paired tool turns or discard instructions.
+  }
   return payload;
 }
 

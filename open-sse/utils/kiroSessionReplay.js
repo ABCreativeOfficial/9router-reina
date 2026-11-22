@@ -1,4 +1,6 @@
 import { MEMORY_CONFIG } from "../config/runtimeConfig.js";
+import { readContinuityState, writeContinuityState } from "../continuity/stateStore.js";
+import { continuitySettings } from "../continuity/config.js";
 
 const sessionStartStore = new Map();
 const MAX_SESSION_STARTS = 5000;
@@ -73,7 +75,16 @@ export function applyKiroSessionReplay({
   currentMessage,
 } = {}) {
   const key = sessionKey(connectionId, conversationId);
-  const existing = conversationId ? sessionStartStore.get(key) : null;
+  // Optional crash/restart recovery. Disk persistence contains the first user
+  // turn (which may include private project instructions); opt-in required.
+  let existing = conversationId ? sessionStartStore.get(key) : null;
+  if (!existing && conversationId && continuitySettings().persist) {
+    const stored = readContinuityState(`kiro-start:${key}`);
+    if (stored?.modelId === modelId && stored?.systemPrompt === systemPrompt && stored?.sessionStart?.userInputMessage) {
+      existing = { ...stored, lastUsed: Date.now() };
+      rememberSessionStart(key, existing);
+    }
+  }
   const baseHistory = clone(history) || [];
   const baseCurrent = clone(currentMessage) || { userInputMessage: { content: "" } };
 
@@ -117,11 +128,9 @@ export function applyKiroSessionReplay({
   }
 
   if (conversationId) {
-    rememberSessionStart(key, {
-      sessionStart: clone(sessionStart),
-      modelId,
-      systemPrompt,
-    });
+    const saved = { sessionStart: clone(sessionStart), modelId, systemPrompt };
+    rememberSessionStart(key, saved);
+    if (continuitySettings().persist) writeContinuityState(`kiro-start:${key}`, saved);
   }
 
   return {
