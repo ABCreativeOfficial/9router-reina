@@ -109,6 +109,7 @@ const LIVE_MODEL_RESOLVERS = {
     } catch {
       return null;
     }
+  },
   xingchi: async (conn) => {
     const proxy = await resolveConnectionProxyConfig(conn.providerSpecificData || {});
     const result = await resolveXingchiModels(conn, { proxyOptions: proxy });

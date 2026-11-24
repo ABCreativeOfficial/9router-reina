@@ -457,7 +457,6 @@ export default function ModelSelectModal({
         }
       } else {
         const liveModels = liveModelsByProvider[providerId] || [];
-        const liveModels = providerId === "codex" ? codexModels : providerId === "cursor" ? cursorModels : providerId === "cline" ? clineModels : providerId === "clinepass" ? clinepassModels : providerId === "zed" ? zedModels : [];
         const codexMediaModels = providerId === "codex" && liveModels.length > 0
           ? getModelsByProviderId(providerId).filter((model) =>
               !model.internal && getModelKind(model) && getModelKind(model) !== "llm"

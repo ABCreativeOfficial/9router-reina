@@ -1049,10 +1049,7 @@
     "auth": {
       "combined": true,
       "header": "Authorization",
-      "scheme": "bearer",
-      "hooks": [
-        "codebuddyHeaders"
-      ]
+      "scheme": "bearer"
     },
     "usage": {
       "url": "https://www.codebuddy.ai/v2/billing/meter/get-user-resource"
@@ -1175,6 +1172,9 @@
   "tokenharbor": {
     "baseUrl": "https://tokenharbor.ai/v1/chat/completions",
     "validateUrl": "https://tokenharbor.ai/v1/models",
+    "usage": {
+      "url": "https://tokenharbor.ai/api/cli/free-tier"
+    },
     "retry": {
       "429": 2
     },
@@ -1491,5 +1491,25 @@
         }
       }
     ]
+  },
+  "xingchi": {
+    "baseUrl": "https://api.xingchiapi.com/v1/responses",
+    "validateUrl": "https://api.xingchiapi.com/v1/models",
+    "usage": {
+      "url": "https://api.xingchiapi.com/v1/usage",
+      "billingUrl": "https://api.xingchiapi.com/v1/sub2api/billing"
+    },
+    "format": "openai-responses",
+    "forceStream": true,
+    "headers": {
+      "x-openai-actor-authorization": "local-image-extension",
+      "originator": "codex_cli_rs",
+      "User-Agent": "codex_cli_rs/0.167.1",
+      "version": "0.167.1"
+    },
+    "quirks": {
+      "disableResponseStorage": true,
+      "forceNonStrictResponsesTools": true
+    }
   }
 }

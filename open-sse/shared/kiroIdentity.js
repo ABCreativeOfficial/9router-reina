@@ -36,7 +36,7 @@ export function buildKiroIdentityHeaders(credentials, client = "runtime") {
       `os/${KIRO_AGENT_OS}#${KIRO_AGENT_OS_VERSION} ` +
       `lang/js md/nodejs#${KIRO_NODE_VERSION} ` +
       `api/${api}#${KIRO_SDK_VERSION} m/${metrics} ${identity}`,
-    "x-amz-user-agent": `aws-sdk-js/${KIRO_SDK_VERSION} ${identity}`,
+    "X-Amz-User-Agent": `aws-sdk-js/${KIRO_SDK_VERSION} ${identity}`,
   };
 }
 
